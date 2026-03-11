@@ -28,6 +28,29 @@ import (
 	"github.com/coder/quartz"
 )
 
+// simulateRunningChat ensures the chat has an active run + step
+// and acquires it with the given workerID so the chat appears
+// "running". If a step already exists (e.g. from reconcileChatRun
+// during CreateChat), it is reused; otherwise a new run + step is
+// created.
+func simulateRunningChat(ctx context.Context, t *testing.T, db database.Store, chatID uuid.UUID, workerID uuid.UUID) {
+	t.Helper()
+	// If there is no active step yet, create a run + step.
+	if _, err := db.GetActiveChatRunStep(ctx, chatID); err != nil {
+		run, err := db.InsertChatRun(ctx, chatID)
+		require.NoError(t, err)
+		_, err = db.InsertChatRunStep(ctx, database.InsertChatRunStepParams{
+			ChatRunID:     run.ID,
+			ChatID:        chatID,
+			ModelConfigID: uuid.NullUUID{},
+		})
+		require.NoError(t, err)
+	}
+	// AcquireChatRunStep assigns the workerID to the run, making it "running".
+	_, err := db.AcquireChatRunStep(ctx, workerID)
+	require.NoError(t, err)
+}
+
 func newTestServer(
 	t *testing.T,
 	db database.Store,
@@ -156,14 +179,7 @@ func TestSubscribeRelayReconnectsOnDrop(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	chat, err = db.UpdateChatStatus(ctx, database.UpdateChatStatusParams{
-		ID:          chat.ID,
-		Status:      database.ChatStatusRunning,
-		WorkerID:    uuid.NullUUID{UUID: workerID, Valid: true},
-		StartedAt:   sql.NullTime{Time: time.Now(), Valid: true},
-		HeartbeatAt: sql.NullTime{Time: time.Now(), Valid: true},
-	})
-	require.NoError(t, err)
+	simulateRunningChat(ctx, t, db, chat.ID, workerID)
 
 	_, events, cancel, ok := subscriber.Subscribe(ctx, chat.ID, nil, 0)
 	require.True(t, ok)
@@ -260,7 +276,7 @@ func TestSubscribeRelayAsyncDoesNotBlock(t *testing.T) {
 	// a status notification which triggers openRelayAsync on the
 	// subscriber.
 	notify := coderdpubsub.ChatStreamNotifyMessage{
-		Status:   string(database.ChatStatusRunning),
+		Status:   string(codersdk.ChatStatusRunning),
 		WorkerID: workerID.String(),
 	}
 	payload, err := json.Marshal(notify)
@@ -280,7 +296,7 @@ func TestSubscribeRelayAsyncDoesNotBlock(t *testing.T) {
 	// another status change. If openRelayAsync blocked the select loop
 	// this event would never arrive.
 	statusNotify := coderdpubsub.ChatStreamNotifyMessage{
-		Status: string(database.ChatStatusWaiting),
+		Status: string(codersdk.ChatStatusWaiting),
 	}
 	statusPayload, err := json.Marshal(statusNotify)
 	require.NoError(t, err)
@@ -357,14 +373,7 @@ func TestSubscribeRelaySnapshotDelivered(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = db.UpdateChatStatus(ctx, database.UpdateChatStatusParams{
-		ID:          chat.ID,
-		Status:      database.ChatStatusRunning,
-		WorkerID:    uuid.NullUUID{UUID: workerID, Valid: true},
-		StartedAt:   sql.NullTime{Time: time.Now(), Valid: true},
-		HeartbeatAt: sql.NullTime{Time: time.Now(), Valid: true},
-	})
-	require.NoError(t, err)
+	simulateRunningChat(ctx, t, db, chat.ID, workerID)
 
 	initialSnapshot, events, cancel, ok := subscriber.Subscribe(ctx, chat.ID, nil, 0)
 	require.True(t, ok)
@@ -470,30 +479,18 @@ func TestSubscribeRelayStaleDialDiscardedAfterInterrupt(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Start chat in waiting state so Subscribe does NOT try an initial relay.
-	_, err = db.UpdateChatStatus(ctx, database.UpdateChatStatusParams{
-		ID:     chat.ID,
-		Status: database.ChatStatusWaiting,
-	})
-	require.NoError(t, err)
+	// Chat starts in pending/waiting state so Subscribe does NOT
+	// try an initial relay.
 
-	// Subscribe while chat is in "waiting" state — no relay opened.
+	// Subscribe while chat is not running — no relay opened.
 	_, events, cancel, ok := subscriber.Subscribe(ctx, chat.ID, nil, 0)
 	require.True(t, ok)
 	t.Cleanup(cancel)
 
 	// Now simulate the chat being picked up by the OLD worker via pubsub.
 	// This triggers openRelayAsync in the merge loop.
-	_, err = db.UpdateChatStatus(ctx, database.UpdateChatStatusParams{
-		ID:          chat.ID,
-		Status:      database.ChatStatusRunning,
-		WorkerID:    uuid.NullUUID{UUID: oldWorkerID, Valid: true},
-		StartedAt:   sql.NullTime{Time: time.Now(), Valid: true},
-		HeartbeatAt: sql.NullTime{Time: time.Now(), Valid: true},
-	})
-	require.NoError(t, err)
 	oldRunningNotify := coderdpubsub.ChatStreamNotifyMessage{
-		Status:   string(database.ChatStatusRunning),
+		Status:   string(codersdk.ChatStatusRunning),
 		WorkerID: oldWorkerID.String(),
 	}
 	oldRunningPayload, err := json.Marshal(oldRunningNotify)
@@ -509,13 +506,8 @@ func TestSubscribeRelayStaleDialDiscardedAfterInterrupt(t *testing.T) {
 	}
 
 	// Simulate interrupt: chat goes to "waiting".
-	_, err = db.UpdateChatStatus(ctx, database.UpdateChatStatusParams{
-		ID:     chat.ID,
-		Status: database.ChatStatusWaiting,
-	})
-	require.NoError(t, err)
 	waitingNotify := coderdpubsub.ChatStreamNotifyMessage{
-		Status: string(database.ChatStatusWaiting),
+		Status: string(codersdk.ChatStatusWaiting),
 	}
 	waitingPayload, err := json.Marshal(waitingNotify)
 	require.NoError(t, err)
@@ -538,16 +530,8 @@ func TestSubscribeRelayStaleDialDiscardedAfterInterrupt(t *testing.T) {
 	}, testutil.WaitMedium, testutil.IntervalFast)
 
 	// Now the chat transitions to running on the NEW worker.
-	_, err = db.UpdateChatStatus(ctx, database.UpdateChatStatusParams{
-		ID:          chat.ID,
-		Status:      database.ChatStatusRunning,
-		WorkerID:    uuid.NullUUID{UUID: newWorkerID, Valid: true},
-		StartedAt:   sql.NullTime{Time: time.Now(), Valid: true},
-		HeartbeatAt: sql.NullTime{Time: time.Now(), Valid: true},
-	})
-	require.NoError(t, err)
 	runningNotify := coderdpubsub.ChatStreamNotifyMessage{
-		Status:   string(database.ChatStatusRunning),
+		Status:   string(codersdk.ChatStatusRunning),
 		WorkerID: newWorkerID.String(),
 	}
 	runningPayload, err := json.Marshal(runningNotify)
@@ -633,20 +617,15 @@ func TestSubscribeCancelDuringInFlightDial(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Put the chat in waiting state so Subscribe does not open a
-	// synchronous relay.
-	_, err = db.UpdateChatStatus(ctx, database.UpdateChatStatusParams{
-		ID:     chat.ID,
-		Status: database.ChatStatusWaiting,
-	})
-	require.NoError(t, err)
+	// Chat starts in pending/waiting state so Subscribe does not
+	// open a synchronous relay.
 
 	_, _, cancel, ok := subscriber.Subscribe(ctx, chat.ID, nil, 0)
 	require.True(t, ok)
 
 	// Publish a running notification to trigger openRelayAsync.
 	notify := coderdpubsub.ChatStreamNotifyMessage{
-		Status:   string(database.ChatStatusRunning),
+		Status:   string(codersdk.ChatStatusRunning),
 		WorkerID: workerID.String(),
 	}
 	payload, err := json.Marshal(notify)
@@ -731,12 +710,8 @@ func TestSubscribeRelayRunningToRunningSwitch(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Start in waiting state so Subscribe does not open a relay.
-	_, err = db.UpdateChatStatus(ctx, database.UpdateChatStatusParams{
-		ID:     chat.ID,
-		Status: database.ChatStatusWaiting,
-	})
-	require.NoError(t, err)
+	// Chat starts in pending/waiting state so Subscribe does not
+	// open a relay.
 
 	_, events, cancel, ok := subscriber.Subscribe(ctx, chat.ID, nil, 0)
 	require.True(t, ok)
@@ -744,7 +719,7 @@ func TestSubscribeRelayRunningToRunningSwitch(t *testing.T) {
 
 	// Transition to running on workerA.
 	notifyA := coderdpubsub.ChatStreamNotifyMessage{
-		Status:   string(database.ChatStatusRunning),
+		Status:   string(codersdk.ChatStatusRunning),
 		WorkerID: workerA.String(),
 	}
 	payloadA, err := json.Marshal(notifyA)
@@ -763,7 +738,7 @@ func TestSubscribeRelayRunningToRunningSwitch(t *testing.T) {
 	// Immediately transition to running on workerB (no waiting in
 	// between). This should cancel workerA's in-flight dial.
 	notifyB := coderdpubsub.ChatStreamNotifyMessage{
-		Status:   string(database.ChatStatusRunning),
+		Status:   string(codersdk.ChatStatusRunning),
 		WorkerID: workerB.String(),
 	}
 	payloadB, err := json.Marshal(notifyB)
@@ -853,13 +828,8 @@ func TestSubscribeRelayFailedDialRetries(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Keep the chat in waiting state so Subscribe does not attempt
-	// a synchronous relay dial.
-	_, err = db.UpdateChatStatus(ctx, database.UpdateChatStatusParams{
-		ID:     chat.ID,
-		Status: database.ChatStatusWaiting,
-	})
-	require.NoError(t, err)
+	// Chat starts in pending/waiting state so Subscribe does not
+	// attempt a synchronous relay dial.
 
 	_, events, cancel, ok := subscriber.Subscribe(ctx, chat.ID, nil, 0)
 	require.True(t, ok)
@@ -869,20 +839,13 @@ func TestSubscribeRelayFailedDialRetries(t *testing.T) {
 	// The reconnect timer calls params.DB.GetChatByID to check if
 	// the chat is still running on a remote worker, so this must be
 	// set before we advance the clock.
-	_, err = db.UpdateChatStatus(ctx, database.UpdateChatStatusParams{
-		ID:          chat.ID,
-		Status:      database.ChatStatusRunning,
-		WorkerID:    uuid.NullUUID{UUID: remoteWorkerID, Valid: true},
-		StartedAt:   sql.NullTime{Time: time.Now(), Valid: true},
-		HeartbeatAt: sql.NullTime{Time: time.Now(), Valid: true},
-	})
-	require.NoError(t, err)
+	simulateRunningChat(ctx, t, db, chat.ID, remoteWorkerID)
 
 	// Publish a running notification with a remote workerID to
 	// trigger openRelayAsync. The first dial will fail, causing
 	// scheduleRelayReconnect to be called.
 	notify := coderdpubsub.ChatStreamNotifyMessage{
-		Status:   string(database.ChatStatusRunning),
+		Status:   string(codersdk.ChatStatusRunning),
 		WorkerID: remoteWorkerID.String(),
 	}
 	payload, err := json.Marshal(notify)
@@ -963,14 +926,7 @@ func TestSubscribeRunningLocalWorkerClosesRelay(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = db.UpdateChatStatus(ctx, database.UpdateChatStatusParams{
-		ID:          chat.ID,
-		Status:      database.ChatStatusRunning,
-		WorkerID:    uuid.NullUUID{UUID: remoteWorkerID, Valid: true},
-		StartedAt:   sql.NullTime{Time: time.Now(), Valid: true},
-		HeartbeatAt: sql.NullTime{Time: time.Now(), Valid: true},
-	})
-	require.NoError(t, err)
+	simulateRunningChat(ctx, t, db, chat.ID, remoteWorkerID)
 
 	_, events, cancel, ok := subscriber.Subscribe(ctx, chat.ID, nil, 0)
 	require.True(t, ok)
@@ -994,7 +950,7 @@ func TestSubscribeRunningLocalWorkerClosesRelay(t *testing.T) {
 	// Notify that the LOCAL worker now owns the chat. This should
 	// close the relay without opening a new one.
 	notify := coderdpubsub.ChatStreamNotifyMessage{
-		Status:   string(database.ChatStatusRunning),
+		Status:   string(codersdk.ChatStatusRunning),
 		WorkerID: subscriberID.String(),
 	}
 	payload, err := json.Marshal(notify)
@@ -1071,14 +1027,7 @@ func TestSubscribeRelayMultipleReconnects(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = db.UpdateChatStatus(ctx, database.UpdateChatStatusParams{
-		ID:          chat.ID,
-		Status:      database.ChatStatusRunning,
-		WorkerID:    uuid.NullUUID{UUID: workerID, Valid: true},
-		StartedAt:   sql.NullTime{Time: time.Now(), Valid: true},
-		HeartbeatAt: sql.NullTime{Time: time.Now(), Valid: true},
-	})
-	require.NoError(t, err)
+	simulateRunningChat(ctx, t, db, chat.ID, workerID)
 
 	_, events, cancel, ok := subscriber.Subscribe(ctx, chat.ID, nil, 0)
 	require.True(t, ok)

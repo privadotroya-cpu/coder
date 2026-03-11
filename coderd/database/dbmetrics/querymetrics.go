@@ -104,11 +104,11 @@ func (m queryMetricsStore) DeleteOrganization(ctx context.Context, id uuid.UUID)
 	return r0
 }
 
-func (m queryMetricsStore) AcquireChat(ctx context.Context, arg database.AcquireChatParams) (database.Chat, error) {
+func (m queryMetricsStore) AcquireChatRunStep(ctx context.Context, workerID uuid.UUID) (database.ChatRun, error) {
 	start := time.Now()
-	r0, r1 := m.s.AcquireChat(ctx, arg)
-	m.queryLatencies.WithLabelValues("AcquireChat").Observe(time.Since(start).Seconds())
-	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "AcquireChat").Inc()
+	r0, r1 := m.s.AcquireChatRunStep(ctx, workerID)
+	m.queryLatencies.WithLabelValues("AcquireChatRunStep").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "AcquireChatRunStep").Inc()
 	return r0, r1
 }
 
@@ -262,6 +262,22 @@ func (m queryMetricsStore) CleanTailnetTunnels(ctx context.Context) error {
 	m.queryLatencies.WithLabelValues("CleanTailnetTunnels").Observe(time.Since(start).Seconds())
 	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "CleanTailnetTunnels").Inc()
 	return r0
+}
+
+func (m queryMetricsStore) ClearChatRunWorker(ctx context.Context, id uuid.UUID) error {
+	start := time.Now()
+	r0 := m.s.ClearChatRunWorker(ctx, id)
+	m.queryLatencies.WithLabelValues("ClearChatRunWorker").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "ClearChatRunWorker").Inc()
+	return r0
+}
+
+func (m queryMetricsStore) CompleteChatRunStep(ctx context.Context, arg database.CompleteChatRunStepParams) (database.ChatRunStep, error) {
+	start := time.Now()
+	r0, r1 := m.s.CompleteChatRunStep(ctx, arg)
+	m.queryLatencies.WithLabelValues("CompleteChatRunStep").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "CompleteChatRunStep").Inc()
+	return r0, r1
 }
 
 func (m queryMetricsStore) CountAIBridgeInterceptions(ctx context.Context, arg database.CountAIBridgeInterceptionsParams) (int64, error) {
@@ -735,6 +751,22 @@ func (m queryMetricsStore) EnqueueNotificationMessage(ctx context.Context, arg d
 	return r0
 }
 
+func (m queryMetricsStore) ErrorChatRunStep(ctx context.Context, arg database.ErrorChatRunStepParams) (database.ChatRunStep, error) {
+	start := time.Now()
+	r0, r1 := m.s.ErrorChatRunStep(ctx, arg)
+	m.queryLatencies.WithLabelValues("ErrorChatRunStep").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "ErrorChatRunStep").Inc()
+	return r0, r1
+}
+
+func (m queryMetricsStore) ErrorStalledChatRunSteps(ctx context.Context, arg database.ErrorStalledChatRunStepsParams) error {
+	start := time.Now()
+	r0 := m.s.ErrorStalledChatRunSteps(ctx, arg)
+	m.queryLatencies.WithLabelValues("ErrorStalledChatRunSteps").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "ErrorStalledChatRunSteps").Inc()
+	return r0
+}
+
 func (m queryMetricsStore) ExpirePrebuildsAPIKeys(ctx context.Context, now time.Time) error {
 	start := time.Now()
 	r0 := m.s.ExpirePrebuildsAPIKeys(ctx, now)
@@ -884,6 +916,14 @@ func (m queryMetricsStore) GetAPIKeysLastUsedAfter(ctx context.Context, lastUsed
 	r0, r1 := m.s.GetAPIKeysLastUsedAfter(ctx, lastUsed)
 	m.queryLatencies.WithLabelValues("GetAPIKeysLastUsedAfter").Observe(time.Since(start).Seconds())
 	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetAPIKeysLastUsedAfter").Inc()
+	return r0, r1
+}
+
+func (m queryMetricsStore) GetActiveChatRunStep(ctx context.Context, chatID uuid.UUID) (database.ChatRunStep, error) {
+	start := time.Now()
+	r0, r1 := m.s.GetActiveChatRunStep(ctx, chatID)
+	m.queryLatencies.WithLabelValues("GetActiveChatRunStep").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetActiveChatRunStep").Inc()
 	return r0, r1
 }
 
@@ -1116,6 +1156,62 @@ func (m queryMetricsStore) GetChatQueuedMessages(ctx context.Context, chatID uui
 	r0, r1 := m.s.GetChatQueuedMessages(ctx, chatID)
 	m.queryLatencies.WithLabelValues("GetChatQueuedMessages").Observe(time.Since(start).Seconds())
 	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetChatQueuedMessages").Inc()
+	return r0, r1
+}
+
+func (m queryMetricsStore) GetChatRunByID(ctx context.Context, id uuid.UUID) (database.ChatRun, error) {
+	start := time.Now()
+	r0, r1 := m.s.GetChatRunByID(ctx, id)
+	m.queryLatencies.WithLabelValues("GetChatRunByID").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetChatRunByID").Inc()
+	return r0, r1
+}
+
+func (m queryMetricsStore) GetChatRunStepByID(ctx context.Context, id uuid.UUID) (database.ChatRunStep, error) {
+	start := time.Now()
+	r0, r1 := m.s.GetChatRunStepByID(ctx, id)
+	m.queryLatencies.WithLabelValues("GetChatRunStepByID").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetChatRunStepByID").Inc()
+	return r0, r1
+}
+
+func (m queryMetricsStore) GetChatRunStepByRunIDAndNumber(ctx context.Context, arg database.GetChatRunStepByRunIDAndNumberParams) (database.ChatRunStep, error) {
+	start := time.Now()
+	r0, r1 := m.s.GetChatRunStepByRunIDAndNumber(ctx, arg)
+	m.queryLatencies.WithLabelValues("GetChatRunStepByRunIDAndNumber").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetChatRunStepByRunIDAndNumber").Inc()
+	return r0, r1
+}
+
+func (m queryMetricsStore) GetChatRunStepsByRunID(ctx context.Context, chatRunID uuid.UUID) ([]database.ChatRunStep, error) {
+	start := time.Now()
+	r0, r1 := m.s.GetChatRunStepsByRunID(ctx, chatRunID)
+	m.queryLatencies.WithLabelValues("GetChatRunStepsByRunID").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetChatRunStepsByRunID").Inc()
+	return r0, r1
+}
+
+func (m queryMetricsStore) GetChatRunsByChatID(ctx context.Context, chatID uuid.UUID) ([]database.ChatRun, error) {
+	start := time.Now()
+	r0, r1 := m.s.GetChatRunsByChatID(ctx, chatID)
+	m.queryLatencies.WithLabelValues("GetChatRunsByChatID").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetChatRunsByChatID").Inc()
+	return r0, r1
+}
+
+func (m queryMetricsStore) GetChatStatusByID(ctx context.Context, id uuid.UUID) (database.ChatStatus, error) {
+	start := time.Now()
+	r0, r1 := m.s.GetChatStatusByID(ctx, id)
+	m.queryLatencies.WithLabelValues("GetChatStatusByID").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetChatStatusByID").Inc()
+	return r0, r1
+}
+
+func (m queryMetricsStore) GetChatStatusesByOwnerID(ctx context.Context, arg database.GetChatStatusesByOwnerIDParams) ([]database.ChatStatus, error) {
+	start := time.Now()
+	r0, r1 := m.s.GetChatStatusesByOwnerID(ctx, arg)
+	m.queryLatencies.WithLabelValues("GetChatStatusesByOwnerID").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetChatStatusesByOwnerID").Inc()
 	return r0, r1
 }
 
@@ -1983,11 +2079,11 @@ func (m queryMetricsStore) GetRuntimeConfig(ctx context.Context, key string) (st
 	return r0, r1
 }
 
-func (m queryMetricsStore) GetStaleChats(ctx context.Context, staleThreshold time.Time) ([]database.Chat, error) {
+func (m queryMetricsStore) GetStaleChatRunSteps(ctx context.Context, staleThreshold time.Time) ([]database.GetStaleChatRunStepsRow, error) {
 	start := time.Now()
-	r0, r1 := m.s.GetStaleChats(ctx, staleThreshold)
-	m.queryLatencies.WithLabelValues("GetStaleChats").Observe(time.Since(start).Seconds())
-	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetStaleChats").Inc()
+	r0, r1 := m.s.GetStaleChatRunSteps(ctx, staleThreshold)
+	m.queryLatencies.WithLabelValues("GetStaleChatRunSteps").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetStaleChatRunSteps").Inc()
 	return r0, r1
 }
 
@@ -3039,6 +3135,22 @@ func (m queryMetricsStore) InsertChatQueuedMessage(ctx context.Context, arg data
 	return r0, r1
 }
 
+func (m queryMetricsStore) InsertChatRun(ctx context.Context, chatID uuid.UUID) (database.ChatRun, error) {
+	start := time.Now()
+	r0, r1 := m.s.InsertChatRun(ctx, chatID)
+	m.queryLatencies.WithLabelValues("InsertChatRun").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "InsertChatRun").Inc()
+	return r0, r1
+}
+
+func (m queryMetricsStore) InsertChatRunStep(ctx context.Context, arg database.InsertChatRunStepParams) (database.ChatRunStep, error) {
+	start := time.Now()
+	r0, r1 := m.s.InsertChatRunStep(ctx, arg)
+	m.queryLatencies.WithLabelValues("InsertChatRunStep").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "InsertChatRunStep").Inc()
+	return r0, r1
+}
+
 func (m queryMetricsStore) InsertCryptoKey(ctx context.Context, arg database.InsertCryptoKeyParams) (database.CryptoKey, error) {
 	start := time.Now()
 	r0, r1 := m.s.InsertCryptoKey(ctx, arg)
@@ -3527,6 +3639,22 @@ func (m queryMetricsStore) InsertWorkspaceResourceMetadata(ctx context.Context, 
 	return r0, r1
 }
 
+func (m queryMetricsStore) InterruptActiveChatRunStep(ctx context.Context, chatID uuid.UUID) error {
+	start := time.Now()
+	r0 := m.s.InterruptActiveChatRunStep(ctx, chatID)
+	m.queryLatencies.WithLabelValues("InterruptActiveChatRunStep").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "InterruptActiveChatRunStep").Inc()
+	return r0
+}
+
+func (m queryMetricsStore) InterruptChatRunStep(ctx context.Context, id uuid.UUID) (database.ChatRunStep, error) {
+	start := time.Now()
+	r0, r1 := m.s.InterruptChatRunStep(ctx, id)
+	m.queryLatencies.WithLabelValues("InterruptChatRunStep").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "InterruptChatRunStep").Inc()
+	return r0, r1
+}
+
 func (m queryMetricsStore) ListAIBridgeInterceptions(ctx context.Context, arg database.ListAIBridgeInterceptionsParams) ([]database.ListAIBridgeInterceptionsRow, error) {
 	start := time.Now()
 	r0, r1 := m.s.ListAIBridgeInterceptions(ctx, arg)
@@ -3791,14 +3919,6 @@ func (m queryMetricsStore) UpdateChatByID(ctx context.Context, arg database.Upda
 	return r0, r1
 }
 
-func (m queryMetricsStore) UpdateChatHeartbeat(ctx context.Context, arg database.UpdateChatHeartbeatParams) (int64, error) {
-	start := time.Now()
-	r0, r1 := m.s.UpdateChatHeartbeat(ctx, arg)
-	m.queryLatencies.WithLabelValues("UpdateChatHeartbeat").Observe(time.Since(start).Seconds())
-	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "UpdateChatHeartbeat").Inc()
-	return r0, r1
-}
-
 func (m queryMetricsStore) UpdateChatMessageByID(ctx context.Context, arg database.UpdateChatMessageByIDParams) (database.ChatMessage, error) {
 	start := time.Now()
 	r0, r1 := m.s.UpdateChatMessageByID(ctx, arg)
@@ -3823,11 +3943,11 @@ func (m queryMetricsStore) UpdateChatProvider(ctx context.Context, arg database.
 	return r0, r1
 }
 
-func (m queryMetricsStore) UpdateChatStatus(ctx context.Context, arg database.UpdateChatStatusParams) (database.Chat, error) {
+func (m queryMetricsStore) UpdateChatRunStepHeartbeat(ctx context.Context, arg database.UpdateChatRunStepHeartbeatParams) (int64, error) {
 	start := time.Now()
-	r0, r1 := m.s.UpdateChatStatus(ctx, arg)
-	m.queryLatencies.WithLabelValues("UpdateChatStatus").Observe(time.Since(start).Seconds())
-	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "UpdateChatStatus").Inc()
+	r0, r1 := m.s.UpdateChatRunStepHeartbeat(ctx, arg)
+	m.queryLatencies.WithLabelValues("UpdateChatRunStepHeartbeat").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "UpdateChatRunStepHeartbeat").Inc()
 	return r0, r1
 }
 

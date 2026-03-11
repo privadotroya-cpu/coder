@@ -26,6 +26,14 @@ FROM
 WHERE
     id = @id::uuid;
 
+-- name: GetChatStatusByID :one
+SELECT
+    *
+FROM
+    chat_statuses
+WHERE
+    id = @id::uuid;
+
 -- name: GetChatMessageByID :one
 SELECT
     *
@@ -141,6 +149,35 @@ LIMIT
     -- Default to 50 to prevent accidental excessively large queries.
     COALESCE(NULLIF(@limit_opt :: int, 0), 50);
 
+-- name: GetChatStatusesByOwnerID :many
+SELECT
+    *
+FROM
+    chat_statuses
+WHERE
+    owner_id = @owner_id::uuid
+    AND CASE
+        WHEN sqlc.narg('archived') :: boolean IS NULL THEN true
+        ELSE chat_statuses.archived = sqlc.narg('archived') :: boolean
+    END
+    AND CASE
+        WHEN @after_id :: uuid != '00000000-0000-0000-0000-000000000000'::uuid THEN (
+            (updated_at, id) < (
+                SELECT
+                    updated_at, id
+                FROM
+                    chats
+                WHERE
+                    id = @after_id
+            )
+        )
+        ELSE true
+    END
+ORDER BY
+    (updated_at, id) DESC OFFSET @offset_opt
+LIMIT
+    COALESCE(NULLIF(@limit_opt :: int, 0), 50);
+
 -- name: ListChildChatsByParentID :many
 SELECT
     *
@@ -193,6 +230,8 @@ WITH updated_chat AS (
 INSERT INTO chat_messages (
     chat_id,
     created_by,
+    chat_run_id,
+    chat_run_step_id,
     model_config_id,
     role,
     content,
@@ -208,6 +247,8 @@ INSERT INTO chat_messages (
 ) VALUES (
     @chat_id::uuid,
     sqlc.narg('created_by')::uuid,
+    sqlc.narg('chat_run_id')::uuid,
+    sqlc.narg('chat_run_step_id')::uuid,
     sqlc.narg('model_config_id')::uuid,
     @role::text,
     sqlc.narg('content')::jsonb,
@@ -256,73 +297,6 @@ WHERE
     id = @id::uuid
 RETURNING
     *;
-
--- name: AcquireChat :one
--- Acquires a pending chat for processing. Uses SKIP LOCKED to prevent
--- multiple replicas from acquiring the same chat.
-UPDATE
-    chats
-SET
-    status = 'running'::chat_status,
-    started_at = @started_at::timestamptz,
-    heartbeat_at = @started_at::timestamptz,
-    updated_at = @started_at::timestamptz,
-    worker_id = @worker_id::uuid
-WHERE
-    id = (
-        SELECT
-            id
-        FROM
-            chats
-        WHERE
-            status = 'pending'::chat_status
-        ORDER BY
-            updated_at ASC
-        FOR UPDATE
-            SKIP LOCKED
-        LIMIT
-            1
-    )
-RETURNING
-    *;
-
--- name: UpdateChatStatus :one
-UPDATE
-    chats
-SET
-    status = @status::chat_status,
-    worker_id = sqlc.narg('worker_id')::uuid,
-    started_at = sqlc.narg('started_at')::timestamptz,
-    heartbeat_at = sqlc.narg('heartbeat_at')::timestamptz,
-    last_error = sqlc.narg('last_error')::text,
-    updated_at = NOW()
-WHERE
-    id = @id::uuid
-RETURNING
-    *;
-
--- name: GetStaleChats :many
--- Find chats that appear stuck (running but heartbeat has expired).
--- Used for recovery after coderd crashes or long hangs.
-SELECT
-    *
-FROM
-    chats
-WHERE
-    status = 'running'::chat_status
-    AND heartbeat_at < @stale_threshold::timestamptz;
-
--- name: UpdateChatHeartbeat :execrows
--- Bumps the heartbeat timestamp for a running chat so that other
--- replicas know the worker is still alive.
-UPDATE
-    chats
-SET
-    heartbeat_at = NOW()
-WHERE
-    id = @id::uuid
-    AND worker_id = @worker_id::uuid
-    AND status = 'running'::chat_status;
 
 -- name: GetChatDiffStatusByChatID :one
 SELECT

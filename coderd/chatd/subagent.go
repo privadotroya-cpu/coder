@@ -13,6 +13,7 @@ import (
 
 	"github.com/coder/coder/v2/coderd/chatd/chatprompt"
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/codersdk"
 )
 
 var ErrSubagentNotDescendant = xerrors.New("target chat is not a descendant of current chat")
@@ -87,10 +88,12 @@ func (p *Server) subagentTools(currentChat func() database.Chat) []fantasy.Agent
 					return fantasy.NewTextErrorResponse(err.Error()), nil
 				}
 
+				// Derive status from run/step state.
+				childStatus, _ := p.deriveChatStatus(ctx, childChat.ID)
 				return toolJSONResponse(map[string]any{
 					"chat_id": childChat.ID.String(),
 					"title":   childChat.Title,
-					"status":  string(childChat.Status),
+					"status":  string(childStatus),
 				}), nil
 			},
 		),
@@ -126,11 +129,13 @@ func (p *Server) subagentTools(currentChat func() database.Chat) []fantasy.Agent
 					return fantasy.NewTextErrorResponse(err.Error()), nil
 				}
 
+				// Derive status from run/step state.
+				targetStatus, _ := p.deriveChatStatus(ctx, targetChatID)
 				return toolJSONResponse(map[string]any{
 					"chat_id": targetChatID.String(),
 					"title":   targetChat.Title,
 					"report":  report,
-					"status":  string(targetChat.Status),
+					"status":  string(targetStatus),
 				}), nil
 			},
 		),
@@ -167,10 +172,12 @@ func (p *Server) subagentTools(currentChat func() database.Chat) []fantasy.Agent
 					return fantasy.NewTextErrorResponse(err.Error()), nil
 				}
 
+				// Derive status from run/step state.
+				msgStatus, _ := p.deriveChatStatus(ctx, targetChatID)
 				return toolJSONResponse(map[string]any{
 					"chat_id":     targetChatID.String(),
 					"title":       targetChat.Title,
-					"status":      string(targetChat.Status),
+					"status":      string(msgStatus),
 					"interrupted": args.Interrupt,
 				}), nil
 			},
@@ -200,11 +207,13 @@ func (p *Server) subagentTools(currentChat func() database.Chat) []fantasy.Agent
 					return fantasy.NewTextErrorResponse(err.Error()), nil
 				}
 
+				// Derive status from run/step state.
+				closeStatus, _ := p.deriveChatStatus(ctx, targetChatID)
 				return toolJSONResponse(map[string]any{
 					"chat_id":    targetChatID.String(),
 					"title":      targetChat.Title,
 					"terminated": true,
-					"status":     string(targetChat.Status),
+					"status":     string(closeStatus),
 				}), nil
 			},
 		),
@@ -332,12 +341,12 @@ func (p *Server) awaitSubagentCompletion(
 	defer ticker.Stop()
 
 	for {
-		targetChat, report, done, checkErr := p.checkSubagentCompletion(ctx, targetChatID)
+		targetChat, report, targetStatus, done, checkErr := p.checkSubagentCompletion(ctx, targetChatID)
 		if checkErr != nil {
 			return database.Chat{}, "", checkErr
 		}
 		if done {
-			if targetChat.Status == database.ChatStatusError {
+			if targetStatus == codersdk.ChatStatusError {
 				reason := strings.TrimSpace(report)
 				if reason == "" {
 					reason = "agent reached error status"
@@ -375,12 +384,14 @@ func (p *Server) closeSubagent(
 		return database.Chat{}, xerrors.Errorf("get target chat: %w", err)
 	}
 
-	if targetChat.Status == database.ChatStatusWaiting {
+	targetStatus, _ := p.deriveChatStatus(ctx, targetChatID)
+	if targetStatus == codersdk.ChatStatusWaiting {
 		return targetChat, nil
 	}
 
 	updatedChat := p.InterruptChat(ctx, targetChat)
-	if updatedChat.Status != database.ChatStatusWaiting {
+	updatedStatus, _ := p.deriveChatStatus(ctx, targetChatID)
+	if updatedStatus != codersdk.ChatStatusWaiting {
 		return database.Chat{}, xerrors.New("set target chat waiting")
 	}
 	return updatedChat, nil
@@ -389,22 +400,24 @@ func (p *Server) closeSubagent(
 func (p *Server) checkSubagentCompletion(
 	ctx context.Context,
 	chatID uuid.UUID,
-) (database.Chat, string, bool, error) {
+) (database.Chat, string, codersdk.ChatStatus, bool, error) {
 	chat, err := p.db.GetChatByID(ctx, chatID)
 	if err != nil {
-		return database.Chat{}, "", false, xerrors.Errorf("get chat: %w", err)
+		return database.Chat{}, "", "", false, xerrors.Errorf("get chat: %w", err)
 	}
 
-	if chat.Status == database.ChatStatusPending || chat.Status == database.ChatStatusRunning {
-		return database.Chat{}, "", false, nil
+	// Derive status from run/step state instead of reading chat.Status.
+	chatStatus, _ := p.deriveChatStatus(ctx, chatID)
+	if chatStatus == codersdk.ChatStatusPending || chatStatus == codersdk.ChatStatusRunning {
+		return database.Chat{}, "", chatStatus, false, nil
 	}
 
 	report, err := latestSubagentAssistantMessage(ctx, p.db, chatID)
 	if err != nil {
-		return database.Chat{}, "", false, err
+		return database.Chat{}, "", chatStatus, false, err
 	}
 
-	return chat, report, true, nil
+	return chat, report, chatStatus, true, nil
 }
 
 func latestSubagentAssistantMessage(

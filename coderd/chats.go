@@ -146,27 +146,26 @@ func (api *API) listChats(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	queryStr := r.URL.Query().Get("q")
-	searchParams, errs := searchquery.Chats(queryStr)
-	if len(errs) > 0 {
-		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
-			Message:     "Invalid chat search query.",
-			Validations: errs,
-		})
-		return
-	}
+		queryStr := r.URL.Query().Get("q")
+		searchParams, errs := searchquery.Chats(queryStr)
+		if len(errs) > 0 {
+			httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
+				Message:     "Invalid chat search query.",
+				Validations: errs,
+			})
+			return
+		}
 
-	params := database.GetChatsByOwnerIDParams{
-		OwnerID:  apiKey.UserID,
-		Archived: searchParams.Archived,
-		AfterID:  paginationParams.AfterID,
-		// #nosec G115 - Pagination offsets are small and fit in int32
+		params := database.GetChatStatusesByOwnerIDParams{
+			OwnerID:  apiKey.UserID,
+			Archived: searchParams.Archived,
+			AfterID:  paginationParams.AfterID,		// #nosec G115 - Pagination offsets are small and fit in int32
 		OffsetOpt: int32(paginationParams.Offset),
 		// #nosec G115 - Pagination limits are small and fit in int32
 		LimitOpt: int32(paginationParams.Limit),
 	}
 
-	chats, err := api.Database.GetChatsByOwnerID(ctx, params)
+	chats, err := api.Database.GetChatStatusesByOwnerID(ctx, params)
 	if err != nil {
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 			Message: "Failed to list chats.",
@@ -189,7 +188,7 @@ func (api *API) listChats(rw http.ResponseWriter, r *http.Request) {
 
 func (api *API) getChatDiffStatusesByChatID(
 	ctx context.Context,
-	chats []database.Chat,
+	chats []database.ChatStatus,
 ) (map[uuid.UUID]database.ChatDiffStatus, error) {
 	if len(chats) == 0 {
 		return map[uuid.UUID]database.ChatDiffStatus{}, nil
@@ -278,7 +277,16 @@ func (api *API) postChats(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpapi.Write(ctx, rw, http.StatusCreated, convertChat(chat, nil))
+	chatStatus, err := api.Database.GetChatStatusByID(ctx, chat.ID)
+	if err != nil {
+		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
+			Message: "Failed to get chat status.",
+			Detail:  err.Error(),
+		})
+		return
+	}
+
+	httpapi.Write(ctx, rw, http.StatusCreated, convertChat(chatStatus, nil))
 }
 
 // EXPERIMENTAL: this endpoint is experimental and is subject to change.
@@ -385,8 +393,17 @@ func (api *API) getChat(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	chatStatus, err := api.Database.GetChatStatusByID(ctx, chatID)
+	if err != nil {
+		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
+			Message: "Failed to get chat status.",
+			Detail:  err.Error(),
+		})
+		return
+	}
+
 	httpapi.Write(ctx, rw, http.StatusOK, codersdk.ChatWithMessages{
-		Chat:           convertChat(chat, nil),
+		Chat:           convertChat(chatStatus, nil),
 		Messages:       convertChatMessages(messages),
 		QueuedMessages: convertChatQueuedMessages(queuedMessages),
 	})
@@ -949,27 +966,28 @@ func (api *API) interruptChat(rw http.ResponseWriter, r *http.Request) {
 	if api.chatDaemon != nil {
 		chat = api.chatDaemon.InterruptChat(ctx, chat)
 	} else {
-		updatedChat, updateErr := api.Database.UpdateChatStatus(ctx, database.UpdateChatStatusParams{
-			ID:          chatID,
-			Status:      database.ChatStatusWaiting,
-			WorkerID:    uuid.NullUUID{},
-			StartedAt:   sql.NullTime{},
-			HeartbeatAt: sql.NullTime{},
-			LastError:   sql.NullString{},
-		})
-		if updateErr != nil {
-			api.Logger.Error(ctx, "failed to mark chat as waiting",
-				slog.F("chat_id", chatID), slog.Error(updateErr))
+		// No daemon running; interrupt the active step directly.
+		if interruptErr := api.Database.InterruptActiveChatRunStep(ctx, chatID); interruptErr != nil {
+			api.Logger.Error(ctx, "failed to interrupt active chat run step",
+				slog.F("chat_id", chatID), slog.Error(interruptErr))
 			httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 				Message: "Failed to interrupt chat.",
-				Detail:  updateErr.Error(),
+				Detail:  interruptErr.Error(),
 			})
 			return
 		}
-		chat = updatedChat
 	}
 
-	httpapi.Write(ctx, rw, http.StatusOK, convertChat(chat, nil))
+	chatStatus, err := api.Database.GetChatStatusByID(ctx, chatID)
+	if err != nil {
+		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
+			Message: "Failed to get chat status.",
+			Detail:  err.Error(),
+		})
+		return
+	}
+
+	httpapi.Write(ctx, rw, http.StatusOK, convertChat(chatStatus, nil))
 }
 
 // EXPERIMENTAL: this endpoint is experimental and is subject to change.
@@ -2188,19 +2206,19 @@ func truncateRunes(value string, maxLen int) string {
 	return string(runes[:maxLen])
 }
 
-func convertChat(c database.Chat, diffStatus *database.ChatDiffStatus) codersdk.Chat {
+func convertChat(c database.ChatStatus, diffStatus *database.ChatDiffStatus) codersdk.Chat {
 	chat := codersdk.Chat{
 		ID:                c.ID,
 		OwnerID:           c.OwnerID,
 		LastModelConfigID: c.LastModelConfigID,
 		Title:             c.Title,
-		Status:            codersdk.ChatStatus(c.Status),
+		Status:            codersdk.ChatStatus(c.ComputedStatus),
 		Archived:          c.Archived,
 		CreatedAt:         c.CreatedAt,
 		UpdatedAt:         c.UpdatedAt,
 	}
-	if c.LastError.Valid {
-		chat.LastError = &c.LastError.String
+	if c.LastRunError.Valid {
+		chat.LastError = &c.LastRunError.String
 	}
 	if c.ParentChatID.Valid {
 		parentChatID := c.ParentChatID.UUID
@@ -2227,7 +2245,7 @@ func convertChat(c database.Chat, diffStatus *database.ChatDiffStatus) codersdk.
 	return chat
 }
 
-func convertChats(chats []database.Chat, diffStatusesByChatID map[uuid.UUID]database.ChatDiffStatus) []codersdk.Chat {
+func convertChats(chats []database.ChatStatus, diffStatusesByChatID map[uuid.UUID]database.ChatDiffStatus) []codersdk.Chat {
 	result := make([]codersdk.Chat, len(chats))
 	for i, c := range chats {
 		diffStatus, ok := diffStatusesByChatID[c.ID]
