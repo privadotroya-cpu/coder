@@ -10,6 +10,8 @@ ALTER TABLE chat_messages DROP COLUMN IF EXISTS chat_run_step_id;
 ALTER TABLE chat_messages DROP COLUMN IF EXISTS chat_run_id;
 
 -- Drop triggers and functions.
+DROP TRIGGER IF EXISTS tg_chat_run_step_chat_id ON chat_run_steps;
+DROP FUNCTION IF EXISTS tg_enforce_chat_run_step_chat_id();
 DROP TRIGGER IF EXISTS tg_chat_run_step_number ON chat_run_steps;
 DROP FUNCTION IF EXISTS tg_assign_chat_run_step_number();
 DROP TRIGGER IF EXISTS tg_chat_run_number ON chat_runs;

@@ -2288,6 +2288,9 @@ SET
     tool_calls_errored = $12::integer
 WHERE
     id = $13::uuid
+    AND completed_at IS NULL
+    AND error IS NULL
+    AND interrupted_at IS NULL
 RETURNING
     id, chat_run_id, chat_id, number, model_config_id, started_at, heartbeat_at, completed_at, interrupted_at, error, continuation_reason, input_tokens, output_tokens, total_tokens, reasoning_tokens, cache_creation_tokens, cache_read_tokens, context_limit, tool_calls_total, tool_calls_completed, tool_calls_errored
 `
@@ -2359,6 +2362,9 @@ SET
     completed_at = NOW()
 WHERE
     id = $2::uuid
+    AND completed_at IS NULL
+    AND error IS NULL
+    AND interrupted_at IS NULL
 RETURNING
     id, chat_run_id, chat_id, number, model_config_id, started_at, heartbeat_at, completed_at, interrupted_at, error, continuation_reason, input_tokens, output_tokens, total_tokens, reasoning_tokens, cache_creation_tokens, cache_read_tokens, context_limit, tool_calls_total, tool_calls_completed, tool_calls_errored
 `
@@ -2867,6 +2873,9 @@ SET
     interrupted_at = NOW()
 WHERE
     id = $1::uuid
+    AND completed_at IS NULL
+    AND error IS NULL
+    AND interrupted_at IS NULL
 RETURNING
     id, chat_run_id, chat_id, number, model_config_id, started_at, heartbeat_at, completed_at, interrupted_at, error, continuation_reason, input_tokens, output_tokens, total_tokens, reasoning_tokens, cache_creation_tokens, cache_read_tokens, context_limit, tool_calls_total, tool_calls_completed, tool_calls_errored
 `
@@ -3991,7 +4000,7 @@ func (q *sqlQuerier) GetChatDiffStatusesByChatIDs(ctx context.Context, chatIds [
 
 const getChatMessageByID = `-- name: GetChatMessageByID :one
 SELECT
-    id, chat_id, model_config_id, created_at, role, content, visibility, input_tokens, output_tokens, total_tokens, reasoning_tokens, cache_creation_tokens, cache_read_tokens, context_limit, compressed, chat_run_id, chat_run_step_id
+    id, chat_id, model_config_id, created_at, role, content, visibility, input_tokens, output_tokens, total_tokens, reasoning_tokens, cache_creation_tokens, cache_read_tokens, context_limit, compressed, created_by, chat_run_id, chat_run_step_id
 FROM
     chat_messages
 WHERE
@@ -4017,6 +4026,7 @@ func (q *sqlQuerier) GetChatMessageByID(ctx context.Context, id int64) (ChatMess
 		&i.CacheReadTokens,
 		&i.ContextLimit,
 		&i.Compressed,
+		&i.CreatedBy,
 		&i.ChatRunID,
 		&i.ChatRunStepID,
 	)
@@ -4025,7 +4035,7 @@ func (q *sqlQuerier) GetChatMessageByID(ctx context.Context, id int64) (ChatMess
 
 const getChatMessagesByChatID = `-- name: GetChatMessagesByChatID :many
 SELECT
-    id, chat_id, model_config_id, created_at, role, content, visibility, input_tokens, output_tokens, total_tokens, reasoning_tokens, cache_creation_tokens, cache_read_tokens, context_limit, compressed, chat_run_id, chat_run_step_id
+    id, chat_id, model_config_id, created_at, role, content, visibility, input_tokens, output_tokens, total_tokens, reasoning_tokens, cache_creation_tokens, cache_read_tokens, context_limit, compressed, created_by, chat_run_id, chat_run_step_id
 FROM
     chat_messages
 WHERE
@@ -4066,6 +4076,7 @@ func (q *sqlQuerier) GetChatMessagesByChatID(ctx context.Context, arg GetChatMes
 			&i.CacheReadTokens,
 			&i.ContextLimit,
 			&i.Compressed,
+			&i.CreatedBy,
 			&i.ChatRunID,
 			&i.ChatRunStepID,
 		); err != nil {
@@ -4099,7 +4110,7 @@ WITH latest_compressed_summary AS (
         1
 )
 SELECT
-    id, chat_id, model_config_id, created_at, role, content, visibility, input_tokens, output_tokens, total_tokens, reasoning_tokens, cache_creation_tokens, cache_read_tokens, context_limit, compressed, chat_run_id, chat_run_step_id
+    id, chat_id, model_config_id, created_at, role, content, visibility, input_tokens, output_tokens, total_tokens, reasoning_tokens, cache_creation_tokens, cache_read_tokens, context_limit, compressed, created_by, chat_run_id, chat_run_step_id
 FROM
     chat_messages
 WHERE
@@ -4164,6 +4175,7 @@ func (q *sqlQuerier) GetChatMessagesForPromptByChatID(ctx context.Context, chatI
 			&i.CacheReadTokens,
 			&i.ContextLimit,
 			&i.Compressed,
+			&i.CreatedBy,
 			&i.ChatRunID,
 			&i.ChatRunStepID,
 		); err != nil {
@@ -4418,7 +4430,7 @@ func (q *sqlQuerier) GetChatsWithStatusByOwnerID(ctx context.Context, arg GetCha
 
 const getLastChatMessageByRole = `-- name: GetLastChatMessageByRole :one
 SELECT
-    id, chat_id, model_config_id, created_at, role, content, visibility, input_tokens, output_tokens, total_tokens, reasoning_tokens, cache_creation_tokens, cache_read_tokens, context_limit, compressed, chat_run_id, chat_run_step_id
+    id, chat_id, model_config_id, created_at, role, content, visibility, input_tokens, output_tokens, total_tokens, reasoning_tokens, cache_creation_tokens, cache_read_tokens, context_limit, compressed, created_by, chat_run_id, chat_run_step_id
 FROM
     chat_messages
 WHERE
@@ -4454,6 +4466,7 @@ func (q *sqlQuerier) GetLastChatMessageByRole(ctx context.Context, arg GetLastCh
 		&i.CacheReadTokens,
 		&i.ContextLimit,
 		&i.Compressed,
+		&i.CreatedBy,
 		&i.ChatRunID,
 		&i.ChatRunStepID,
 	)
@@ -4520,13 +4533,14 @@ WITH updated_chat AS (
     UPDATE
         chats
     SET
-        last_model_config_id = $4::uuid
+        last_model_config_id = $5::uuid
     WHERE
         id = $1::uuid
-        AND $4::uuid IS NOT NULL
+        AND $5::uuid IS NOT NULL
 )
 INSERT INTO chat_messages (
     chat_id,
+    created_by,
     chat_run_id,
     chat_run_step_id,
     model_config_id,
@@ -4546,24 +4560,26 @@ INSERT INTO chat_messages (
     $2::uuid,
     $3::uuid,
     $4::uuid,
-    $5::text,
-    $6::jsonb,
-    $7::chat_message_visibility,
-    $8::bigint,
+    $5::uuid,
+    $6::text,
+    $7::jsonb,
+    $8::chat_message_visibility,
     $9::bigint,
     $10::bigint,
     $11::bigint,
     $12::bigint,
     $13::bigint,
     $14::bigint,
-    COALESCE($15::boolean, FALSE)
+    $15::bigint,
+    COALESCE($16::boolean, FALSE)
 )
 RETURNING
-    id, chat_id, model_config_id, created_at, role, content, visibility, input_tokens, output_tokens, total_tokens, reasoning_tokens, cache_creation_tokens, cache_read_tokens, context_limit, compressed, chat_run_id, chat_run_step_id
+    id, chat_id, model_config_id, created_at, role, content, visibility, input_tokens, output_tokens, total_tokens, reasoning_tokens, cache_creation_tokens, cache_read_tokens, context_limit, compressed, created_by, chat_run_id, chat_run_step_id
 `
 
 type InsertChatMessageParams struct {
 	ChatID              uuid.UUID             `db:"chat_id" json:"chat_id"`
+	CreatedBy           uuid.NullUUID         `db:"created_by" json:"created_by"`
 	ChatRunID           uuid.NullUUID         `db:"chat_run_id" json:"chat_run_id"`
 	ChatRunStepID       uuid.NullUUID         `db:"chat_run_step_id" json:"chat_run_step_id"`
 	ModelConfigID       uuid.NullUUID         `db:"model_config_id" json:"model_config_id"`
@@ -4583,6 +4599,7 @@ type InsertChatMessageParams struct {
 func (q *sqlQuerier) InsertChatMessage(ctx context.Context, arg InsertChatMessageParams) (ChatMessage, error) {
 	row := q.db.QueryRowContext(ctx, insertChatMessage,
 		arg.ChatID,
+		arg.CreatedBy,
 		arg.ChatRunID,
 		arg.ChatRunStepID,
 		arg.ModelConfigID,
@@ -4615,6 +4632,7 @@ func (q *sqlQuerier) InsertChatMessage(ctx context.Context, arg InsertChatMessag
 		&i.CacheReadTokens,
 		&i.ContextLimit,
 		&i.Compressed,
+		&i.CreatedBy,
 		&i.ChatRunID,
 		&i.ChatRunStepID,
 	)
@@ -4813,7 +4831,7 @@ SET
 WHERE
     id = $3::bigint
 RETURNING
-    id, chat_id, model_config_id, created_at, role, content, visibility, input_tokens, output_tokens, total_tokens, reasoning_tokens, cache_creation_tokens, cache_read_tokens, context_limit, compressed, chat_run_id, chat_run_step_id
+    id, chat_id, model_config_id, created_at, role, content, visibility, input_tokens, output_tokens, total_tokens, reasoning_tokens, cache_creation_tokens, cache_read_tokens, context_limit, compressed, created_by, chat_run_id, chat_run_step_id
 `
 
 type UpdateChatMessageByIDParams struct {
@@ -4841,6 +4859,7 @@ func (q *sqlQuerier) UpdateChatMessageByID(ctx context.Context, arg UpdateChatMe
 		&i.CacheReadTokens,
 		&i.ContextLimit,
 		&i.Compressed,
+		&i.CreatedBy,
 		&i.ChatRunID,
 		&i.ChatRunStepID,
 	)

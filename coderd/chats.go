@@ -146,25 +146,25 @@ func (api *API) listChats(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-		queryStr := r.URL.Query().Get("q")
-		searchParams, errs := searchquery.Chats(queryStr)
-		if len(errs) > 0 {
-			httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
-				Message:     "Invalid chat search query.",
-				Validations: errs,
-			})
-			return
-		}
+	queryStr := r.URL.Query().Get("q")
+	searchParams, errs := searchquery.Chats(queryStr)
+	if len(errs) > 0 {
+		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
+			Message:     "Invalid chat search query.",
+			Validations: errs,
+		})
+		return
+	}
 
-		params := database.GetChatsWithStatusByOwnerIDParams{
-			OwnerID:  apiKey.UserID,
-			Archived: searchParams.Archived,
-			AfterID:  paginationParams.AfterID,
-			// #nosec G115 - Pagination offsets are small and fit in int32
-			OffsetOpt: int32(paginationParams.Offset),
-			// #nosec G115 - Pagination limits are small and fit in int32
-			LimitOpt: int32(paginationParams.Limit),
-		}
+	params := database.GetChatsWithStatusByOwnerIDParams{
+		OwnerID:  apiKey.UserID,
+		Archived: searchParams.Archived,
+		AfterID:  paginationParams.AfterID,
+		// #nosec G115 - Pagination offsets are small and fit in int32
+		OffsetOpt: int32(paginationParams.Offset),
+		// #nosec G115 - Pagination limits are small and fit in int32
+		LimitOpt: int32(paginationParams.Limit),
+	}
 	chats, err := api.Database.GetChatsWithStatusByOwnerID(ctx, params)
 	if err != nil {
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{

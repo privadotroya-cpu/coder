@@ -429,24 +429,25 @@ func (p *Server) SendMessage(
 			return nil
 		}
 
-			message, err := insertChatMessageWithStore(ctx, tx, database.InsertChatMessageParams{
-				ChatID:              lockedChat.ID,
-				ModelConfigID:       uuid.NullUUID{UUID: modelConfigID, Valid: true},
-				CreatedBy:           uuid.NullUUID{UUID: opts.CreatedBy, Valid: opts.CreatedBy != uuid.Nil},
-				ChatRunID:           uuid.NullUUID{},
-				ChatRunStepID:       uuid.NullUUID{},
-				Role:                "user",
-				Content:             content,
-				Visibility:          database.ChatMessageVisibilityBoth,
-				InputTokens:         sql.NullInt64{},
-				OutputTokens:        sql.NullInt64{},
-				TotalTokens:         sql.NullInt64{},
-				ReasoningTokens:     sql.NullInt64{},
-				CacheCreationTokens: sql.NullInt64{},
-				CacheReadTokens:     sql.NullInt64{},
-				ContextLimit:        sql.NullInt64{},
-				Compressed:          sql.NullBool{},
-			})		if err != nil {
+		message, err := insertChatMessageWithStore(ctx, tx, database.InsertChatMessageParams{
+			ChatID:              lockedChat.ID,
+			ModelConfigID:       uuid.NullUUID{UUID: modelConfigID, Valid: true},
+			CreatedBy:           uuid.NullUUID{UUID: opts.CreatedBy, Valid: opts.CreatedBy != uuid.Nil},
+			ChatRunID:           uuid.NullUUID{},
+			ChatRunStepID:       uuid.NullUUID{},
+			Role:                "user",
+			Content:             content,
+			Visibility:          database.ChatMessageVisibilityBoth,
+			InputTokens:         sql.NullInt64{},
+			OutputTokens:        sql.NullInt64{},
+			TotalTokens:         sql.NullInt64{},
+			ReasoningTokens:     sql.NullInt64{},
+			CacheCreationTokens: sql.NullInt64{},
+			CacheReadTokens:     sql.NullInt64{},
+			ContextLimit:        sql.NullInt64{},
+			Compressed:          sql.NullBool{},
+		})
+		if err != nil {
 			return xerrors.Errorf("insert user message: %w", err)
 		}
 		result.Message = message
@@ -768,17 +769,18 @@ func (p *Server) PromoteQueued(
 				RawMessage: targetContent,
 				Valid:      len(targetContent) > 0,
 			},
-				CreatedBy:           uuid.NullUUID{UUID: opts.CreatedBy, Valid: opts.CreatedBy != uuid.Nil},
-				Visibility:          database.ChatMessageVisibilityBoth,
-				InputTokens:         sql.NullInt64{},
-				OutputTokens:        sql.NullInt64{},
-				TotalTokens:         sql.NullInt64{},
-				ReasoningTokens:     sql.NullInt64{},
-				CacheCreationTokens: sql.NullInt64{},
-				CacheReadTokens:     sql.NullInt64{},
-				ContextLimit:        sql.NullInt64{},
-				Compressed:          sql.NullBool{},
-			})		if err != nil {
+			CreatedBy:           uuid.NullUUID{UUID: opts.CreatedBy, Valid: opts.CreatedBy != uuid.Nil},
+			Visibility:          database.ChatMessageVisibilityBoth,
+			InputTokens:         sql.NullInt64{},
+			OutputTokens:        sql.NullInt64{},
+			TotalTokens:         sql.NullInt64{},
+			ReasoningTokens:     sql.NullInt64{},
+			CacheCreationTokens: sql.NullInt64{},
+			CacheReadTokens:     sql.NullInt64{},
+			ContextLimit:        sql.NullInt64{},
+			Compressed:          sql.NullBool{},
+		})
+		if err != nil {
 			return xerrors.Errorf("insert promoted message: %w", err)
 		}
 		remainingQueue, err = tx.GetChatQueuedMessages(ctx, opts.ChatID)
@@ -1608,7 +1610,8 @@ func (p *Server) publishStatus(chatID uuid.UUID, status codersdk.ChatStatus) {
 		Status: &codersdk.ChatStreamStatus{Status: status},
 	})
 	notify := coderdpubsub.ChatStreamNotifyMessage{
-		Status: string(status),
+		Status:   string(status),
+		WorkerID: p.workerID.String(),
 	}
 	p.publishChatStreamNotify(chatID, notify)
 }
@@ -1953,10 +1956,12 @@ func (p *Server) processChat(ctx context.Context, chat database.Chat, run databa
 		switch status {
 		case codersdk.ChatStatusError:
 			// Mark the active step as errored.
+			// Terminal-state guard: the query is a no-op if the step
+			// was already completed/errored/interrupted.
 			if _, errStep := p.db.ErrorChatRunStep(cleanupCtx, database.ErrorChatRunStepParams{
 				ID:    step.ID,
 				Error: lastError,
-			}); errStep != nil {
+			}); errStep != nil && !errors.Is(errStep, sql.ErrNoRows) {
 				logger.Error(cleanupCtx, "failed to error chat run step",
 					slog.F("step_id", step.ID), slog.Error(errStep))
 			}
@@ -1973,33 +1978,35 @@ func (p *Server) processChat(ctx context.Context, chat database.Chat, run databa
 					slog.F("run_id", run.ID), slog.Error(errClear))
 			}
 
-			case codersdk.ChatStatusWaiting:
-				// Completed normally or was interrupted.
-				if wasInterrupted {
-					if _, errInt := p.db.InterruptChatRunStep(cleanupCtx, step.ID); errInt != nil {
-						logger.Error(cleanupCtx, "failed to interrupt chat run step",
-							slog.F("step_id", step.ID), slog.Error(errInt))
-					}
-				} else {
-					// Complete the step (the final PersistStep already
-					// inserted messages; we just mark the step done).
-					if _, errComplete := p.db.CompleteChatRunStep(cleanupCtx, database.CompleteChatRunStepParams{
-						ID:                  step.ID,
-						CompletedAt:         time.Now(),
-						ContinuationReason:  sql.NullString{},
-						InputTokens:         sql.NullInt32{},
-						OutputTokens:        sql.NullInt32{},
-						TotalTokens:         sql.NullInt32{},
-						ReasoningTokens:     sql.NullInt32{},
-						CacheCreationTokens: sql.NullInt32{},
-						CacheReadTokens:     sql.NullInt32{},
-						ContextLimit:        sql.NullInt32{},
-						ToolCallsTotal:      0,
-						ToolCallsCompleted:  0,
-						ToolCallsErrored:    0,
-					}); errComplete != nil {
-						logger.Error(cleanupCtx, "failed to complete chat run step",
-							slog.F("step_id", step.ID), slog.Error(errComplete))				}
+		case codersdk.ChatStatusWaiting:
+			// Completed normally or was interrupted.
+			if wasInterrupted {
+				// Terminal-state guard: no-op if already terminal.
+				if _, errInt := p.db.InterruptChatRunStep(cleanupCtx, step.ID); errInt != nil && !errors.Is(errInt, sql.ErrNoRows) {
+					logger.Error(cleanupCtx, "failed to interrupt chat run step",
+						slog.F("step_id", step.ID), slog.Error(errInt))
+				}
+			} else {
+				// Complete the step (the final PersistStep already
+				// inserted messages; we just mark the step done).
+				if _, errComplete := p.db.CompleteChatRunStep(cleanupCtx, database.CompleteChatRunStepParams{
+					ID:                  step.ID,
+					CompletedAt:         time.Now(),
+					ContinuationReason:  sql.NullString{},
+					InputTokens:         sql.NullInt32{},
+					OutputTokens:        sql.NullInt32{},
+					TotalTokens:         sql.NullInt32{},
+					ReasoningTokens:     sql.NullInt32{},
+					CacheCreationTokens: sql.NullInt32{},
+					CacheReadTokens:     sql.NullInt32{},
+					ContextLimit:        sql.NullInt32{},
+					ToolCallsTotal:      0,
+					ToolCallsCompleted:  0,
+					ToolCallsErrored:    0,
+				}); errComplete != nil && !errors.Is(errComplete, sql.ErrNoRows) {
+					logger.Error(cleanupCtx, "failed to complete chat run step",
+						slog.F("step_id", step.ID), slog.Error(errComplete))
+				}
 			}
 			if errClear := p.db.ClearChatRunWorker(cleanupCtx, run.ID); errClear != nil {
 				logger.Error(cleanupCtx, "failed to clear run worker",
@@ -2020,9 +2027,9 @@ func (p *Server) processChat(ctx context.Context, chat database.Chat, run databa
 				msg, insertErr := tx.InsertChatMessage(cleanupCtx, database.InsertChatMessageParams{
 					ChatID:        chat.ID,
 					ModelConfigID: uuid.NullUUID{UUID: lockedChat.LastModelConfigID, Valid: true},
+					CreatedBy:     uuid.NullUUID{UUID: chat.OwnerID, Valid: true},
 					ChatRunID:     uuid.NullUUID{},
-					ChatRunStepID: uuid.NullUUID{},
-					Role:          "user",
+					ChatRunStepID: uuid.NullUUID{}, Role: "user",
 					Content: pqtype.NullRawMessage{
 						RawMessage: nextQueued.Content,
 						Valid:      len(nextQueued.Content) > 0,
@@ -2999,10 +3006,15 @@ func (p *Server) recoverStaleChatRunSteps(ctx context.Context) {
 		)
 
 		// Mark the stale step as errored.
+		// Terminal-state guard: skip if already errored/completed.
 		if _, errStep := p.db.ErrorChatRunStep(ctx, database.ErrorChatRunStepParams{
 			ID:    staleStep.ID,
 			Error: "worker heartbeat expired (stale step recovery)",
 		}); errStep != nil {
+			if errors.Is(errStep, sql.ErrNoRows) {
+				// Step already transitioned to a terminal state.
+				continue
+			}
 			p.logger.Error(ctx, "failed to error stale step",
 				slog.F("step_id", staleStep.ID), slog.Error(errStep))
 			continue

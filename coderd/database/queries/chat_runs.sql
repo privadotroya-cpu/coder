@@ -84,6 +84,9 @@ SET
     tool_calls_errored = @tool_calls_errored::integer
 WHERE
     id = @id::uuid
+    AND completed_at IS NULL
+    AND error IS NULL
+    AND interrupted_at IS NULL
 RETURNING
     *;
 
@@ -96,6 +99,9 @@ SET
     completed_at = NOW()
 WHERE
     id = @id::uuid
+    AND completed_at IS NULL
+    AND error IS NULL
+    AND interrupted_at IS NULL
 RETURNING
     *;
 
@@ -106,6 +112,9 @@ SET
     interrupted_at = NOW()
 WHERE
     id = @id::uuid
+    AND completed_at IS NULL
+    AND error IS NULL
+    AND interrupted_at IS NULL
 RETURNING
     *;
 

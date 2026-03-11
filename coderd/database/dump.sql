@@ -1048,6 +1048,21 @@ BEGIN
 END;
 $$;
 
+CREATE FUNCTION tg_enforce_chat_run_step_chat_id() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    run_chat_id UUID;
+BEGIN
+    SELECT chat_id INTO run_chat_id FROM chat_runs WHERE id = NEW.chat_run_id;
+    IF run_chat_id IS DISTINCT FROM NEW.chat_id THEN
+        RAISE EXCEPTION 'chat_run_steps.chat_id (%) does not match chat_runs.chat_id (%)',
+            NEW.chat_id, run_chat_id;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
 CREATE TABLE aibridge_interceptions (
     id uuid NOT NULL,
     initiator_id uuid NOT NULL,
@@ -1229,6 +1244,7 @@ CREATE TABLE chat_messages (
     cache_read_tokens bigint,
     context_limit bigint,
     compressed boolean DEFAULT false NOT NULL,
+    created_by uuid,
     chat_run_id uuid,
     chat_run_step_id uuid
 );
@@ -1344,7 +1360,7 @@ CREATE VIEW chat_run_steps_with_status AS
             WHEN (chat_run_steps.error IS NOT NULL) THEN 'error'::text
             WHEN (chat_run_steps.interrupted_at IS NOT NULL) THEN 'interrupted'::text
             WHEN (chat_run_steps.completed_at IS NOT NULL) THEN 'completed'::text
-            WHEN (chat_run_steps.heartbeat_at < (now() - '00:01:30'::interval)) THEN 'stalled'::text
+            WHEN (chat_run_steps.heartbeat_at < (now() - '00:05:00'::interval)) THEN 'stalled'::text
             ELSE 'running'::text
         END AS status
    FROM chat_run_steps;
@@ -3886,6 +3902,8 @@ CREATE TRIGGER tailnet_notify_tunnel_change AFTER INSERT OR DELETE OR UPDATE ON 
 
 CREATE TRIGGER tg_chat_run_number BEFORE INSERT ON chat_runs FOR EACH ROW EXECUTE FUNCTION tg_assign_chat_run_number();
 
+CREATE TRIGGER tg_chat_run_step_chat_id BEFORE INSERT ON chat_run_steps FOR EACH ROW EXECUTE FUNCTION tg_enforce_chat_run_step_chat_id();
+
 CREATE TRIGGER tg_chat_run_step_number BEFORE INSERT ON chat_run_steps FOR EACH ROW EXECUTE FUNCTION tg_assign_chat_run_step_number();
 
 CREATE TRIGGER trigger_aggregate_usage_event AFTER INSERT ON usage_events FOR EACH ROW EXECUTE FUNCTION aggregate_usage_event();
@@ -3933,10 +3951,10 @@ ALTER TABLE ONLY chat_messages
     ADD CONSTRAINT chat_messages_chat_id_fkey FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY chat_messages
-    ADD CONSTRAINT chat_messages_chat_run_id_fkey FOREIGN KEY (chat_run_id) REFERENCES chat_runs(id);
+    ADD CONSTRAINT chat_messages_chat_run_id_fkey FOREIGN KEY (chat_run_id) REFERENCES chat_runs(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY chat_messages
-    ADD CONSTRAINT chat_messages_chat_run_step_id_fkey FOREIGN KEY (chat_run_step_id) REFERENCES chat_run_steps(id);
+    ADD CONSTRAINT chat_messages_chat_run_step_id_fkey FOREIGN KEY (chat_run_step_id) REFERENCES chat_run_steps(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY chat_messages
     ADD CONSTRAINT chat_messages_model_config_id_fkey FOREIGN KEY (model_config_id) REFERENCES chat_model_configs(id);

@@ -75,6 +75,26 @@ CREATE TRIGGER tg_chat_run_step_number
     BEFORE INSERT ON chat_run_steps
     FOR EACH ROW EXECUTE FUNCTION tg_assign_chat_run_step_number();
 
+-- Enforce that chat_run_steps.chat_id matches the parent
+-- chat_runs.chat_id. A mismatch would bypass the single-active-step
+-- partial unique index.
+CREATE FUNCTION tg_enforce_chat_run_step_chat_id() RETURNS trigger AS $$
+DECLARE
+    run_chat_id UUID;
+BEGIN
+    SELECT chat_id INTO run_chat_id FROM chat_runs WHERE id = NEW.chat_run_id;
+    IF run_chat_id IS DISTINCT FROM NEW.chat_id THEN
+        RAISE EXCEPTION 'chat_run_steps.chat_id (%) does not match chat_runs.chat_id (%)',
+            NEW.chat_id, run_chat_id;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER tg_chat_run_step_chat_id
+    BEFORE INSERT ON chat_run_steps
+    FOR EACH ROW EXECUTE FUNCTION tg_enforce_chat_run_step_chat_id();
+
 -- Enforce at most one active step per chat. This is the database-level
 -- guarantee that prevents concurrent runs on the same chat.
 CREATE UNIQUE INDEX chat_run_steps_single_active
@@ -84,8 +104,8 @@ CREATE UNIQUE INDEX chat_run_steps_single_active
       AND interrupted_at IS NULL;
 
 -- Link messages to their originating run and step.
-ALTER TABLE chat_messages ADD COLUMN chat_run_id UUID REFERENCES chat_runs(id);
-ALTER TABLE chat_messages ADD COLUMN chat_run_step_id UUID REFERENCES chat_run_steps(id);
+ALTER TABLE chat_messages ADD COLUMN chat_run_id UUID REFERENCES chat_runs(id) ON DELETE CASCADE;
+ALTER TABLE chat_messages ADD COLUMN chat_run_step_id UUID REFERENCES chat_run_steps(id) ON DELETE CASCADE;
 
 -- Drop columns from chats that are now tracked on runs/steps.
 DROP INDEX IF EXISTS idx_chats_pending;
@@ -106,7 +126,7 @@ SELECT *,
         WHEN error IS NOT NULL THEN 'error'
         WHEN interrupted_at IS NOT NULL THEN 'interrupted'
         WHEN completed_at IS NOT NULL THEN 'completed'
-        WHEN heartbeat_at < NOW() - INTERVAL '90 seconds' THEN 'stalled'
+        WHEN heartbeat_at < NOW() - INTERVAL '5 minutes' THEN 'stalled'
         ELSE 'running'
     END AS status
 FROM chat_run_steps;
