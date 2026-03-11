@@ -3931,18 +3931,6 @@ type ChatRun struct {
 	LastStepNumber int32         `db:"last_step_number" json:"last_step_number"`
 }
 
-type ChatRunStatus struct {
-	ID             uuid.UUID      `db:"id" json:"id"`
-	ChatID         uuid.UUID      `db:"chat_id" json:"chat_id"`
-	Number         int32          `db:"number" json:"number"`
-	CreatedAt      time.Time      `db:"created_at" json:"created_at"`
-	WorkerID       uuid.NullUUID  `db:"worker_id" json:"worker_id"`
-	LastStepNumber int32          `db:"last_step_number" json:"last_step_number"`
-	StepStatus     sql.NullString `db:"step_status" json:"step_status"`
-	StepError      sql.NullString `db:"step_error" json:"step_error"`
-	UpdatedAt      time.Time      `db:"updated_at" json:"updated_at"`
-}
-
 type ChatRunStep struct {
 	ID                  uuid.UUID      `db:"id" json:"id"`
 	ChatRunID           uuid.UUID      `db:"chat_run_id" json:"chat_run_id"`
@@ -3967,7 +3955,7 @@ type ChatRunStep struct {
 	ToolCallsErrored    int32          `db:"tool_calls_errored" json:"tool_calls_errored"`
 }
 
-type ChatRunStepStatus struct {
+type ChatRunStepWithStatus struct {
 	ID                  uuid.UUID      `db:"id" json:"id"`
 	ChatRunID           uuid.UUID      `db:"chat_run_id" json:"chat_run_id"`
 	ChatID              uuid.UUID      `db:"chat_id" json:"chat_id"`
@@ -3992,7 +3980,19 @@ type ChatRunStepStatus struct {
 	Status              string         `db:"status" json:"status"`
 }
 
-type ChatStatus struct {
+type ChatRunWithStatus struct {
+	ID             uuid.UUID      `db:"id" json:"id"`
+	ChatID         uuid.UUID      `db:"chat_id" json:"chat_id"`
+	Number         int32          `db:"number" json:"number"`
+	CreatedAt      time.Time      `db:"created_at" json:"created_at"`
+	WorkerID       uuid.NullUUID  `db:"worker_id" json:"worker_id"`
+	LastStepNumber int32          `db:"last_step_number" json:"last_step_number"`
+	StepStatus     sql.NullString `db:"step_status" json:"step_status"`
+	StepError      sql.NullString `db:"step_error" json:"step_error"`
+	UpdatedAt      time.Time      `db:"updated_at" json:"updated_at"`
+}
+
+type ChatWithStatus struct {
 	ID                uuid.UUID      `db:"id" json:"id"`
 	OwnerID           uuid.UUID      `db:"owner_id" json:"owner_id"`
 	WorkspaceID       uuid.NullUUID  `db:"workspace_id" json:"workspace_id"`

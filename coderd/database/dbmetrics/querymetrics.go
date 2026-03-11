@@ -1199,22 +1199,6 @@ func (m queryMetricsStore) GetChatRunsByChatID(ctx context.Context, chatID uuid.
 	return r0, r1
 }
 
-func (m queryMetricsStore) GetChatStatusByID(ctx context.Context, id uuid.UUID) (database.ChatStatus, error) {
-	start := time.Now()
-	r0, r1 := m.s.GetChatStatusByID(ctx, id)
-	m.queryLatencies.WithLabelValues("GetChatStatusByID").Observe(time.Since(start).Seconds())
-	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetChatStatusByID").Inc()
-	return r0, r1
-}
-
-func (m queryMetricsStore) GetChatStatusesByOwnerID(ctx context.Context, arg database.GetChatStatusesByOwnerIDParams) ([]database.ChatStatus, error) {
-	start := time.Now()
-	r0, r1 := m.s.GetChatStatusesByOwnerID(ctx, arg)
-	m.queryLatencies.WithLabelValues("GetChatStatusesByOwnerID").Observe(time.Since(start).Seconds())
-	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetChatStatusesByOwnerID").Inc()
-	return r0, r1
-}
-
 func (m queryMetricsStore) GetChatSystemPrompt(ctx context.Context) (string, error) {
 	start := time.Now()
 	r0, r1 := m.s.GetChatSystemPrompt(ctx)
@@ -1223,11 +1207,27 @@ func (m queryMetricsStore) GetChatSystemPrompt(ctx context.Context) (string, err
 	return r0, r1
 }
 
+func (m queryMetricsStore) GetChatWithStatusByID(ctx context.Context, id uuid.UUID) (database.ChatWithStatus, error) {
+	start := time.Now()
+	r0, r1 := m.s.GetChatWithStatusByID(ctx, id)
+	m.queryLatencies.WithLabelValues("GetChatWithStatusByID").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetChatWithStatusByID").Inc()
+	return r0, r1
+}
+
 func (m queryMetricsStore) GetChatsByOwnerID(ctx context.Context, ownerID database.GetChatsByOwnerIDParams) ([]database.Chat, error) {
 	start := time.Now()
 	r0, r1 := m.s.GetChatsByOwnerID(ctx, ownerID)
 	m.queryLatencies.WithLabelValues("GetChatsByOwnerID").Observe(time.Since(start).Seconds())
 	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetChatsByOwnerID").Inc()
+	return r0, r1
+}
+
+func (m queryMetricsStore) GetChatsWithStatusByOwnerID(ctx context.Context, arg database.GetChatsWithStatusByOwnerIDParams) ([]database.ChatWithStatus, error) {
+	start := time.Now()
+	r0, r1 := m.s.GetChatsWithStatusByOwnerID(ctx, arg)
+	m.queryLatencies.WithLabelValues("GetChatsWithStatusByOwnerID").Observe(time.Since(start).Seconds())
+	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetChatsWithStatusByOwnerID").Inc()
 	return r0, r1
 }
 

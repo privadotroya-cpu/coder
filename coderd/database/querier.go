@@ -257,10 +257,10 @@ type sqlcQuerier interface {
 	GetChatRunStepsByRunID(ctx context.Context, chatRunID uuid.UUID) ([]ChatRunStep, error)
 	// Lists all runs for a chat, most recent first.
 	GetChatRunsByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatRun, error)
-	GetChatStatusByID(ctx context.Context, id uuid.UUID) (ChatStatus, error)
-	GetChatStatusesByOwnerID(ctx context.Context, arg GetChatStatusesByOwnerIDParams) ([]ChatStatus, error)
 	GetChatSystemPrompt(ctx context.Context) (string, error)
+	GetChatWithStatusByID(ctx context.Context, id uuid.UUID) (ChatWithStatus, error)
 	GetChatsByOwnerID(ctx context.Context, arg GetChatsByOwnerIDParams) ([]Chat, error)
+	GetChatsWithStatusByOwnerID(ctx context.Context, arg GetChatsWithStatusByOwnerIDParams) ([]ChatWithStatus, error)
 	GetConnectionLogsOffset(ctx context.Context, arg GetConnectionLogsOffsetParams) ([]GetConnectionLogsOffsetRow, error)
 	GetCoordinatorResumeTokenSigningKey(ctx context.Context) (string, error)
 	GetCryptoKeyByFeatureAndSequence(ctx context.Context, arg GetCryptoKeyByFeatureAndSequenceParams) (CryptoKey, error)

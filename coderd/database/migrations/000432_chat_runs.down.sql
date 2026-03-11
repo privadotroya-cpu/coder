@@ -1,9 +1,9 @@
 -- Reverse 000431_chat_runs.up.sql
 
 -- Drop views (reverse order of creation).
-DROP VIEW IF EXISTS chat_statuses;
-DROP VIEW IF EXISTS chat_run_statuses;
-DROP VIEW IF EXISTS chat_run_step_statuses;
+DROP VIEW IF EXISTS chats_with_status;
+DROP VIEW IF EXISTS chat_runs_with_status;
+DROP VIEW IF EXISTS chat_run_steps_with_status;
 
 -- Remove run/step linkage from messages.
 ALTER TABLE chat_messages DROP COLUMN IF EXISTS chat_run_step_id;

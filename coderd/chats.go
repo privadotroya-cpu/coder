@@ -156,16 +156,16 @@ func (api *API) listChats(rw http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		params := database.GetChatStatusesByOwnerIDParams{
+		params := database.GetChatsWithStatusByOwnerIDParams{
 			OwnerID:  apiKey.UserID,
 			Archived: searchParams.Archived,
-			AfterID:  paginationParams.AfterID,		// #nosec G115 - Pagination offsets are small and fit in int32
-		OffsetOpt: int32(paginationParams.Offset),
-		// #nosec G115 - Pagination limits are small and fit in int32
-		LimitOpt: int32(paginationParams.Limit),
-	}
-
-	chats, err := api.Database.GetChatStatusesByOwnerID(ctx, params)
+			AfterID:  paginationParams.AfterID,
+			// #nosec G115 - Pagination offsets are small and fit in int32
+			OffsetOpt: int32(paginationParams.Offset),
+			// #nosec G115 - Pagination limits are small and fit in int32
+			LimitOpt: int32(paginationParams.Limit),
+		}
+	chats, err := api.Database.GetChatsWithStatusByOwnerID(ctx, params)
 	if err != nil {
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 			Message: "Failed to list chats.",
@@ -188,7 +188,7 @@ func (api *API) listChats(rw http.ResponseWriter, r *http.Request) {
 
 func (api *API) getChatDiffStatusesByChatID(
 	ctx context.Context,
-	chats []database.ChatStatus,
+	chats []database.ChatWithStatus,
 ) (map[uuid.UUID]database.ChatDiffStatus, error) {
 	if len(chats) == 0 {
 		return map[uuid.UUID]database.ChatDiffStatus{}, nil
@@ -277,7 +277,7 @@ func (api *API) postChats(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	chatStatus, err := api.Database.GetChatStatusByID(ctx, chat.ID)
+	chatStatus, err := api.Database.GetChatWithStatusByID(ctx, chat.ID)
 	if err != nil {
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 			Message: "Failed to get chat status.",
@@ -393,7 +393,7 @@ func (api *API) getChat(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	chatStatus, err := api.Database.GetChatStatusByID(ctx, chatID)
+	chatStatus, err := api.Database.GetChatWithStatusByID(ctx, chatID)
 	if err != nil {
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 			Message: "Failed to get chat status.",
@@ -978,7 +978,7 @@ func (api *API) interruptChat(rw http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	chatStatus, err := api.Database.GetChatStatusByID(ctx, chatID)
+	chatStatus, err := api.Database.GetChatWithStatusByID(ctx, chatID)
 	if err != nil {
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 			Message: "Failed to get chat status.",
@@ -2206,7 +2206,7 @@ func truncateRunes(value string, maxLen int) string {
 	return string(runes[:maxLen])
 }
 
-func convertChat(c database.ChatStatus, diffStatus *database.ChatDiffStatus) codersdk.Chat {
+func convertChat(c database.ChatWithStatus, diffStatus *database.ChatDiffStatus) codersdk.Chat {
 	chat := codersdk.Chat{
 		ID:                c.ID,
 		OwnerID:           c.OwnerID,
@@ -2245,7 +2245,7 @@ func convertChat(c database.ChatStatus, diffStatus *database.ChatDiffStatus) cod
 	return chat
 }
 
-func convertChats(chats []database.ChatStatus, diffStatusesByChatID map[uuid.UUID]database.ChatDiffStatus) []codersdk.Chat {
+func convertChats(chats []database.ChatWithStatus, diffStatusesByChatID map[uuid.UUID]database.ChatDiffStatus) []codersdk.Chat {
 	result := make([]codersdk.Chat, len(chats))
 	for i, c := range chats {
 		diffStatus, ok := diffStatusesByChatID[c.ID]

@@ -178,7 +178,7 @@ func (c Chat) RBACObject() rbac.Object {
 	return rbac.ResourceChat.WithID(c.ID).WithOwner(c.OwnerID.String())
 }
 
-func (c ChatStatus) RBACObject() rbac.Object {
+func (c ChatWithStatus) RBACObject() rbac.Object {
 	return rbac.ResourceChat.WithID(c.ID).WithOwner(c.OwnerID.String())
 }
 

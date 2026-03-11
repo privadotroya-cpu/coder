@@ -2194,36 +2194,6 @@ func (mr *MockStoreMockRecorder) GetChatRunsByChatID(ctx, chatID any) *gomock.Ca
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatRunsByChatID", reflect.TypeOf((*MockStore)(nil).GetChatRunsByChatID), ctx, chatID)
 }
 
-// GetChatStatusByID mocks base method.
-func (m *MockStore) GetChatStatusByID(ctx context.Context, id uuid.UUID) (database.ChatStatus, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetChatStatusByID", ctx, id)
-	ret0, _ := ret[0].(database.ChatStatus)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// GetChatStatusByID indicates an expected call of GetChatStatusByID.
-func (mr *MockStoreMockRecorder) GetChatStatusByID(ctx, id any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatStatusByID", reflect.TypeOf((*MockStore)(nil).GetChatStatusByID), ctx, id)
-}
-
-// GetChatStatusesByOwnerID mocks base method.
-func (m *MockStore) GetChatStatusesByOwnerID(ctx context.Context, arg database.GetChatStatusesByOwnerIDParams) ([]database.ChatStatus, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetChatStatusesByOwnerID", ctx, arg)
-	ret0, _ := ret[0].([]database.ChatStatus)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// GetChatStatusesByOwnerID indicates an expected call of GetChatStatusesByOwnerID.
-func (mr *MockStoreMockRecorder) GetChatStatusesByOwnerID(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatStatusesByOwnerID", reflect.TypeOf((*MockStore)(nil).GetChatStatusesByOwnerID), ctx, arg)
-}
-
 // GetChatSystemPrompt mocks base method.
 func (m *MockStore) GetChatSystemPrompt(ctx context.Context) (string, error) {
 	m.ctrl.T.Helper()
@@ -2239,6 +2209,21 @@ func (mr *MockStoreMockRecorder) GetChatSystemPrompt(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatSystemPrompt", reflect.TypeOf((*MockStore)(nil).GetChatSystemPrompt), ctx)
 }
 
+// GetChatWithStatusByID mocks base method.
+func (m *MockStore) GetChatWithStatusByID(ctx context.Context, id uuid.UUID) (database.ChatWithStatus, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetChatWithStatusByID", ctx, id)
+	ret0, _ := ret[0].(database.ChatWithStatus)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetChatWithStatusByID indicates an expected call of GetChatWithStatusByID.
+func (mr *MockStoreMockRecorder) GetChatWithStatusByID(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatWithStatusByID", reflect.TypeOf((*MockStore)(nil).GetChatWithStatusByID), ctx, id)
+}
+
 // GetChatsByOwnerID mocks base method.
 func (m *MockStore) GetChatsByOwnerID(ctx context.Context, arg database.GetChatsByOwnerIDParams) ([]database.Chat, error) {
 	m.ctrl.T.Helper()
@@ -2252,6 +2237,21 @@ func (m *MockStore) GetChatsByOwnerID(ctx context.Context, arg database.GetChats
 func (mr *MockStoreMockRecorder) GetChatsByOwnerID(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatsByOwnerID", reflect.TypeOf((*MockStore)(nil).GetChatsByOwnerID), ctx, arg)
+}
+
+// GetChatsWithStatusByOwnerID mocks base method.
+func (m *MockStore) GetChatsWithStatusByOwnerID(ctx context.Context, arg database.GetChatsWithStatusByOwnerIDParams) ([]database.ChatWithStatus, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetChatsWithStatusByOwnerID", ctx, arg)
+	ret0, _ := ret[0].([]database.ChatWithStatus)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetChatsWithStatusByOwnerID indicates an expected call of GetChatsWithStatusByOwnerID.
+func (mr *MockStoreMockRecorder) GetChatsWithStatusByOwnerID(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatsWithStatusByOwnerID", reflect.TypeOf((*MockStore)(nil).GetChatsWithStatusByOwnerID), ctx, arg)
 }
 
 // GetConnectionLogsOffset mocks base method.

@@ -2656,14 +2656,6 @@ func (q *querier) GetChatRunsByChatID(ctx context.Context, chatID uuid.UUID) ([]
 	return q.db.GetChatRunsByChatID(ctx, chatID)
 }
 
-func (q *querier) GetChatStatusByID(ctx context.Context, id uuid.UUID) (database.ChatStatus, error) {
-	return fetch(q.log, q.auth, q.db.GetChatStatusByID)(ctx, id)
-}
-
-func (q *querier) GetChatStatusesByOwnerID(ctx context.Context, arg database.GetChatStatusesByOwnerIDParams) ([]database.ChatStatus, error) {
-	return fetchWithPostFilter(q.auth, policy.ActionRead, q.db.GetChatStatusesByOwnerID)(ctx, arg)
-}
-
 func (q *querier) GetChatSystemPrompt(ctx context.Context) (string, error) {
 	// The system prompt is a deployment-wide setting read during chat
 	// creation by every authenticated user, so no RBAC policy check
@@ -2676,8 +2668,16 @@ func (q *querier) GetChatSystemPrompt(ctx context.Context) (string, error) {
 	return q.db.GetChatSystemPrompt(ctx)
 }
 
+func (q *querier) GetChatWithStatusByID(ctx context.Context, id uuid.UUID) (database.ChatWithStatus, error) {
+	return fetch(q.log, q.auth, q.db.GetChatWithStatusByID)(ctx, id)
+}
+
 func (q *querier) GetChatsByOwnerID(ctx context.Context, ownerID database.GetChatsByOwnerIDParams) ([]database.Chat, error) {
 	return fetchWithPostFilter(q.auth, policy.ActionRead, q.db.GetChatsByOwnerID)(ctx, ownerID)
+}
+
+func (q *querier) GetChatsWithStatusByOwnerID(ctx context.Context, arg database.GetChatsWithStatusByOwnerIDParams) ([]database.ChatWithStatus, error) {
+	return fetchWithPostFilter(q.auth, policy.ActionRead, q.db.GetChatsWithStatusByOwnerID)(ctx, arg)
 }
 
 func (q *querier) GetConnectionLogsOffset(ctx context.Context, arg database.GetConnectionLogsOffsetParams) ([]database.GetConnectionLogsOffsetRow, error) {

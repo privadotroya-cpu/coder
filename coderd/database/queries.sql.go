@@ -4214,18 +4214,18 @@ func (q *sqlQuerier) GetChatQueuedMessages(ctx context.Context, chatID uuid.UUID
 	return items, nil
 }
 
-const getChatStatusByID = `-- name: GetChatStatusByID :one
+const getChatWithStatusByID = `-- name: GetChatWithStatusByID :one
 SELECT
     id, owner_id, workspace_id, title, created_at, updated_at, parent_chat_id, root_chat_id, last_model_config_id, archived, last_run_number, computed_status, last_run_error, last_run_id
 FROM
-    chat_statuses
+    chats_with_status
 WHERE
     id = $1::uuid
 `
 
-func (q *sqlQuerier) GetChatStatusByID(ctx context.Context, id uuid.UUID) (ChatStatus, error) {
-	row := q.db.QueryRowContext(ctx, getChatStatusByID, id)
-	var i ChatStatus
+func (q *sqlQuerier) GetChatWithStatusByID(ctx context.Context, id uuid.UUID) (ChatWithStatus, error) {
+	row := q.db.QueryRowContext(ctx, getChatWithStatusByID, id)
+	var i ChatWithStatus
 	err := row.Scan(
 		&i.ID,
 		&i.OwnerID,
@@ -4243,88 +4243,6 @@ func (q *sqlQuerier) GetChatStatusByID(ctx context.Context, id uuid.UUID) (ChatS
 		&i.LastRunID,
 	)
 	return i, err
-}
-
-const getChatStatusesByOwnerID = `-- name: GetChatStatusesByOwnerID :many
-SELECT
-    id, owner_id, workspace_id, title, created_at, updated_at, parent_chat_id, root_chat_id, last_model_config_id, archived, last_run_number, computed_status, last_run_error, last_run_id
-FROM
-    chat_statuses
-WHERE
-    owner_id = $1::uuid
-    AND CASE
-        WHEN $2 :: boolean IS NULL THEN true
-        ELSE chat_statuses.archived = $2 :: boolean
-    END
-    AND CASE
-        WHEN $3 :: uuid != '00000000-0000-0000-0000-000000000000'::uuid THEN (
-            (updated_at, id) < (
-                SELECT
-                    updated_at, id
-                FROM
-                    chats
-                WHERE
-                    id = $3
-            )
-        )
-        ELSE true
-    END
-ORDER BY
-    (updated_at, id) DESC OFFSET $4
-LIMIT
-    COALESCE(NULLIF($5 :: int, 0), 50)
-`
-
-type GetChatStatusesByOwnerIDParams struct {
-	OwnerID   uuid.UUID    `db:"owner_id" json:"owner_id"`
-	Archived  sql.NullBool `db:"archived" json:"archived"`
-	AfterID   uuid.UUID    `db:"after_id" json:"after_id"`
-	OffsetOpt int32        `db:"offset_opt" json:"offset_opt"`
-	LimitOpt  int32        `db:"limit_opt" json:"limit_opt"`
-}
-
-func (q *sqlQuerier) GetChatStatusesByOwnerID(ctx context.Context, arg GetChatStatusesByOwnerIDParams) ([]ChatStatus, error) {
-	rows, err := q.db.QueryContext(ctx, getChatStatusesByOwnerID,
-		arg.OwnerID,
-		arg.Archived,
-		arg.AfterID,
-		arg.OffsetOpt,
-		arg.LimitOpt,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ChatStatus
-	for rows.Next() {
-		var i ChatStatus
-		if err := rows.Scan(
-			&i.ID,
-			&i.OwnerID,
-			&i.WorkspaceID,
-			&i.Title,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.ParentChatID,
-			&i.RootChatID,
-			&i.LastModelConfigID,
-			&i.Archived,
-			&i.LastRunNumber,
-			&i.ComputedStatus,
-			&i.LastRunError,
-			&i.LastRunID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const getChatsByOwnerID = `-- name: GetChatsByOwnerID :many
@@ -4402,6 +4320,88 @@ func (q *sqlQuerier) GetChatsByOwnerID(ctx context.Context, arg GetChatsByOwnerI
 			&i.LastModelConfigID,
 			&i.Archived,
 			&i.LastRunNumber,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getChatsWithStatusByOwnerID = `-- name: GetChatsWithStatusByOwnerID :many
+SELECT
+    id, owner_id, workspace_id, title, created_at, updated_at, parent_chat_id, root_chat_id, last_model_config_id, archived, last_run_number, computed_status, last_run_error, last_run_id
+FROM
+    chats_with_status
+WHERE
+    owner_id = $1::uuid
+    AND CASE
+        WHEN $2 :: boolean IS NULL THEN true
+        ELSE chats_with_status.archived = $2 :: boolean
+    END
+    AND CASE
+        WHEN $3 :: uuid != '00000000-0000-0000-0000-000000000000'::uuid THEN (
+            (updated_at, id) < (
+                SELECT
+                    updated_at, id
+                FROM
+                    chats
+                WHERE
+                    id = $3
+            )
+        )
+        ELSE true
+    END
+ORDER BY
+    (updated_at, id) DESC OFFSET $4
+LIMIT
+    COALESCE(NULLIF($5 :: int, 0), 50)
+`
+
+type GetChatsWithStatusByOwnerIDParams struct {
+	OwnerID   uuid.UUID    `db:"owner_id" json:"owner_id"`
+	Archived  sql.NullBool `db:"archived" json:"archived"`
+	AfterID   uuid.UUID    `db:"after_id" json:"after_id"`
+	OffsetOpt int32        `db:"offset_opt" json:"offset_opt"`
+	LimitOpt  int32        `db:"limit_opt" json:"limit_opt"`
+}
+
+func (q *sqlQuerier) GetChatsWithStatusByOwnerID(ctx context.Context, arg GetChatsWithStatusByOwnerIDParams) ([]ChatWithStatus, error) {
+	rows, err := q.db.QueryContext(ctx, getChatsWithStatusByOwnerID,
+		arg.OwnerID,
+		arg.Archived,
+		arg.AfterID,
+		arg.OffsetOpt,
+		arg.LimitOpt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ChatWithStatus
+	for rows.Next() {
+		var i ChatWithStatus
+		if err := rows.Scan(
+			&i.ID,
+			&i.OwnerID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ParentChatID,
+			&i.RootChatID,
+			&i.LastModelConfigID,
+			&i.Archived,
+			&i.LastRunNumber,
+			&i.ComputedStatus,
+			&i.LastRunError,
+			&i.LastRunID,
 		); err != nil {
 			return nil, err
 		}

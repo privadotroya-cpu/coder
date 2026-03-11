@@ -1318,7 +1318,7 @@ CREATE TABLE chat_run_steps (
     tool_calls_errored integer DEFAULT 0 NOT NULL
 );
 
-CREATE VIEW chat_run_step_statuses AS
+CREATE VIEW chat_run_steps_with_status AS
  SELECT chat_run_steps.id,
     chat_run_steps.chat_run_id,
     chat_run_steps.chat_id,
@@ -1358,7 +1358,7 @@ CREATE TABLE chat_runs (
     last_step_number integer DEFAULT 0 NOT NULL
 );
 
-CREATE VIEW chat_run_statuses AS
+CREATE VIEW chat_runs_with_status AS
  SELECT r.id,
     r.chat_id,
     r.number,
@@ -1369,7 +1369,7 @@ CREATE VIEW chat_run_statuses AS
     s.error AS step_error,
     COALESCE(s.completed_at, s.interrupted_at, s.started_at) AS updated_at
    FROM (chat_runs r
-     LEFT JOIN chat_run_step_statuses s ON (((s.chat_run_id = r.id) AND (s.number = r.last_step_number))));
+     LEFT JOIN chat_run_steps_with_status s ON (((s.chat_run_id = r.id) AND (s.number = r.last_step_number))));
 
 CREATE TABLE chats (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -1385,7 +1385,7 @@ CREATE TABLE chats (
     last_run_number integer DEFAULT 0 NOT NULL
 );
 
-CREATE VIEW chat_statuses AS
+CREATE VIEW chats_with_status AS
  SELECT c.id,
     c.owner_id,
     c.workspace_id,
@@ -1409,7 +1409,7 @@ CREATE VIEW chat_statuses AS
     r.step_error AS last_run_error,
     r.id AS last_run_id
    FROM (chats c
-     LEFT JOIN chat_run_statuses r ON (((r.chat_id = c.id) AND (r.number = c.last_run_number))));
+     LEFT JOIN chat_runs_with_status r ON (((r.chat_id = c.id) AND (r.number = c.last_run_number))));
 
 CREATE TABLE connection_logs (
     id uuid NOT NULL,

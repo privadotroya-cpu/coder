@@ -26,11 +26,11 @@ FROM
 WHERE
     id = @id::uuid;
 
--- name: GetChatStatusByID :one
+-- name: GetChatWithStatusByID :one
 SELECT
     *
 FROM
-    chat_statuses
+    chats_with_status
 WHERE
     id = @id::uuid;
 
@@ -149,16 +149,16 @@ LIMIT
     -- Default to 50 to prevent accidental excessively large queries.
     COALESCE(NULLIF(@limit_opt :: int, 0), 50);
 
--- name: GetChatStatusesByOwnerID :many
+-- name: GetChatsWithStatusByOwnerID :many
 SELECT
     *
 FROM
-    chat_statuses
+    chats_with_status
 WHERE
     owner_id = @owner_id::uuid
     AND CASE
         WHEN sqlc.narg('archived') :: boolean IS NULL THEN true
-        ELSE chat_statuses.archived = sqlc.narg('archived') :: boolean
+        ELSE chats_with_status.archived = sqlc.narg('archived') :: boolean
     END
     AND CASE
         WHEN @after_id :: uuid != '00000000-0000-0000-0000-000000000000'::uuid THEN (

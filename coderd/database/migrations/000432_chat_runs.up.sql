@@ -100,7 +100,7 @@ DROP TYPE IF EXISTS chat_status;
 -- than storing it directly. Historical runs keep their terminal
 -- state forever.
 
-CREATE VIEW chat_run_step_statuses AS
+CREATE VIEW chat_run_steps_with_status AS
 SELECT *,
     CASE
         WHEN error IS NOT NULL THEN 'error'
@@ -111,17 +111,17 @@ SELECT *,
     END AS status
 FROM chat_run_steps;
 
-CREATE VIEW chat_run_statuses AS
+CREATE VIEW chat_runs_with_status AS
 SELECT
     r.*,
     s.status AS step_status,
     s.error AS step_error,
     COALESCE(s.completed_at, s.interrupted_at, s.started_at) AS updated_at
 FROM chat_runs r
-LEFT JOIN chat_run_step_statuses s
+LEFT JOIN chat_run_steps_with_status s
     ON s.chat_run_id = r.id AND s.number = r.last_step_number;
 
-CREATE VIEW chat_statuses AS
+CREATE VIEW chats_with_status AS
 SELECT
     c.*,
     CASE
@@ -139,5 +139,5 @@ SELECT
     r.step_error AS last_run_error,
     r.id AS last_run_id
 FROM chats c
-LEFT JOIN chat_run_statuses r
+LEFT JOIN chat_runs_with_status r
     ON r.chat_id = c.id AND r.number = c.last_run_number;

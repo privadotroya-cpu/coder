@@ -612,17 +612,17 @@ func (s *MethodTestSuite) TestChats() {
 		dbm.EXPECT().GetChatRunsByChatID(gomock.Any(), chatID).Return(runs, nil).AnyTimes()
 		check.Args(chatID).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(runs)
 	}))
-	s.Run("GetChatStatusByID", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
-		status := testutil.Fake(s.T(), faker, database.ChatStatus{})
-		dbm.EXPECT().GetChatStatusByID(gomock.Any(), status.ID).Return(status, nil).AnyTimes()
+	s.Run("GetChatWithStatusByID", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		status := testutil.Fake(s.T(), faker, database.ChatWithStatus{})
+		dbm.EXPECT().GetChatWithStatusByID(gomock.Any(), status.ID).Return(status, nil).AnyTimes()
 		check.Args(status.ID).Asserts(status, policy.ActionRead).Returns(status)
 	}))
-	s.Run("GetChatStatusesByOwnerID", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
-		s1 := testutil.Fake(s.T(), faker, database.ChatStatus{})
-		s2 := testutil.Fake(s.T(), faker, database.ChatStatus{})
-		params := database.GetChatStatusesByOwnerIDParams{OwnerID: s1.OwnerID}
-		dbm.EXPECT().GetChatStatusesByOwnerID(gomock.Any(), params).Return([]database.ChatStatus{s1, s2}, nil).AnyTimes()
-		check.Args(params).Asserts(s1, policy.ActionRead, s2, policy.ActionRead).Returns([]database.ChatStatus{s1, s2})
+	s.Run("GetChatsWithStatusByOwnerID", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		s1 := testutil.Fake(s.T(), faker, database.ChatWithStatus{})
+		s2 := testutil.Fake(s.T(), faker, database.ChatWithStatus{})
+		params := database.GetChatsWithStatusByOwnerIDParams{OwnerID: s1.OwnerID}
+		dbm.EXPECT().GetChatsWithStatusByOwnerID(gomock.Any(), params).Return([]database.ChatWithStatus{s1, s2}, nil).AnyTimes()
+		check.Args(params).Asserts(s1, policy.ActionRead, s2, policy.ActionRead).Returns([]database.ChatWithStatus{s1, s2})
 	}))
 	s.Run("GetChatSystemPrompt", s.Mocked(func(dbm *dbmock.MockStore, _ *gofakeit.Faker, check *expects) {
 		dbm.EXPECT().GetChatSystemPrompt(gomock.Any()).Return("prompt", nil).AnyTimes()
