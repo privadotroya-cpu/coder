@@ -249,14 +249,6 @@ type sqlcQuerier interface {
 	GetChatProviders(ctx context.Context) ([]ChatProvider, error)
 	GetChatQueuedMessages(ctx context.Context, chatID uuid.UUID) ([]ChatQueuedMessage, error)
 	GetChatRunByID(ctx context.Context, id uuid.UUID) (ChatRun, error)
-	GetChatRunStepByID(ctx context.Context, id uuid.UUID) (ChatRunStep, error)
-	// Gets a step by its run and step number. Useful for fetching the
-	// latest step of a run.
-	GetChatRunStepByRunIDAndNumber(ctx context.Context, arg GetChatRunStepByRunIDAndNumberParams) (ChatRunStep, error)
-	// Lists all steps for a run in execution order.
-	GetChatRunStepsByRunID(ctx context.Context, chatRunID uuid.UUID) ([]ChatRunStep, error)
-	// Lists all runs for a chat, most recent first.
-	GetChatRunsByChatID(ctx context.Context, chatID uuid.UUID) ([]ChatRun, error)
 	GetChatSystemPrompt(ctx context.Context) (string, error)
 	GetChatWithStatusByID(ctx context.Context, id uuid.UUID) (ChatWithStatus, error)
 	GetChatsByOwnerID(ctx context.Context, arg GetChatsByOwnerIDParams) ([]Chat, error)

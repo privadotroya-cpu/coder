@@ -179,41 +179,11 @@ WHERE
     AND error IS NULL
     AND interrupted_at IS NULL;
 
--- name: GetChatRunsByChatID :many
--- Lists all runs for a chat, most recent first.
-SELECT
-    *
-FROM
-    chat_runs
-WHERE
-    chat_id = @chat_id::uuid
-ORDER BY
-    number DESC;
-
--- name: GetChatRunStepsByRunID :many
--- Lists all steps for a run in execution order.
-SELECT
-    *
-FROM
-    chat_run_steps
-WHERE
-    chat_run_id = @chat_run_id::uuid
-ORDER BY
-    number ASC;
-
 -- name: GetChatRunByID :one
 SELECT
     *
 FROM
     chat_runs
-WHERE
-    id = @id::uuid;
-
--- name: GetChatRunStepByID :one
-SELECT
-    *
-FROM
-    chat_run_steps
 WHERE
     id = @id::uuid;
 
@@ -225,13 +195,3 @@ SET worker_id = NULL
 WHERE
     id = @id::uuid;
 
--- name: GetChatRunStepByRunIDAndNumber :one
--- Gets a step by its run and step number. Useful for fetching the
--- latest step of a run.
-SELECT
-    *
-FROM
-    chat_run_steps
-WHERE
-    chat_run_id = @chat_run_id::uuid
-    AND number = @number::integer;

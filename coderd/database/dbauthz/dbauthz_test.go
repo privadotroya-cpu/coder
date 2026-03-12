@@ -594,29 +594,6 @@ func (s *MethodTestSuite) TestChats() {
 		dbm.EXPECT().GetChatByID(gomock.Any(), chat.ID).Return(chat, nil).AnyTimes()
 		check.Args(run.ID).Asserts(chat, policy.ActionRead).Returns(run)
 	}))
-	s.Run("GetChatRunStepByID", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
-		step := testutil.Fake(s.T(), faker, database.ChatRunStep{})
-		dbm.EXPECT().GetChatRunStepByID(gomock.Any(), step.ID).Return(step, nil).AnyTimes()
-		check.Args(step.ID).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(step)
-	}))
-	s.Run("GetChatRunStepByRunIDAndNumber", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
-		arg := testutil.Fake(s.T(), faker, database.GetChatRunStepByRunIDAndNumberParams{})
-		step := testutil.Fake(s.T(), faker, database.ChatRunStep{})
-		dbm.EXPECT().GetChatRunStepByRunIDAndNumber(gomock.Any(), arg).Return(step, nil).AnyTimes()
-		check.Args(arg).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(step)
-	}))
-	s.Run("GetChatRunStepsByRunID", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
-		runID := uuid.New()
-		steps := []database.ChatRunStep{testutil.Fake(s.T(), faker, database.ChatRunStep{})}
-		dbm.EXPECT().GetChatRunStepsByRunID(gomock.Any(), runID).Return(steps, nil).AnyTimes()
-		check.Args(runID).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(steps)
-	}))
-	s.Run("GetChatRunsByChatID", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
-		chatID := uuid.New()
-		runs := []database.ChatRun{testutil.Fake(s.T(), faker, database.ChatRun{})}
-		dbm.EXPECT().GetChatRunsByChatID(gomock.Any(), chatID).Return(runs, nil).AnyTimes()
-		check.Args(chatID).Asserts(rbac.ResourceChat, policy.ActionRead).Returns(runs)
-	}))
 	s.Run("GetChatWithStatusByID", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
 		status := testutil.Fake(s.T(), faker, database.ChatWithStatus{})
 		dbm.EXPECT().GetChatWithStatusByID(gomock.Any(), status.ID).Return(status, nil).AnyTimes()

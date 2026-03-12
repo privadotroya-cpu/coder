@@ -2644,34 +2644,6 @@ func (q *querier) GetChatRunByID(ctx context.Context, id uuid.UUID) (database.Ch
 	return run, nil
 }
 
-func (q *querier) GetChatRunStepByID(ctx context.Context, id uuid.UUID) (database.ChatRunStep, error) {
-	if err := q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat); err != nil {
-		return database.ChatRunStep{}, err
-	}
-	return q.db.GetChatRunStepByID(ctx, id)
-}
-
-func (q *querier) GetChatRunStepByRunIDAndNumber(ctx context.Context, arg database.GetChatRunStepByRunIDAndNumberParams) (database.ChatRunStep, error) {
-	if err := q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat); err != nil {
-		return database.ChatRunStep{}, err
-	}
-	return q.db.GetChatRunStepByRunIDAndNumber(ctx, arg)
-}
-
-func (q *querier) GetChatRunStepsByRunID(ctx context.Context, chatRunID uuid.UUID) ([]database.ChatRunStep, error) {
-	if err := q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat); err != nil {
-		return nil, err
-	}
-	return q.db.GetChatRunStepsByRunID(ctx, chatRunID)
-}
-
-func (q *querier) GetChatRunsByChatID(ctx context.Context, chatID uuid.UUID) ([]database.ChatRun, error) {
-	if err := q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat); err != nil {
-		return nil, err
-	}
-	return q.db.GetChatRunsByChatID(ctx, chatID)
-}
-
 func (q *querier) GetChatSystemPrompt(ctx context.Context) (string, error) {
 	// The system prompt is a deployment-wide setting read during chat
 	// creation by every authenticated user, so no RBAC policy check

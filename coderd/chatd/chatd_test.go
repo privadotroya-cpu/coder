@@ -57,21 +57,15 @@ func simulateRunningChat(ctx context.Context, t *testing.T, db database.Store, c
 	require.NoError(t, err)
 }
 
-// deriveChatStatus computes the chat status by checking active run steps,
-// mirroring the server-side derivation logic.
+// deriveChatStatus computes the chat status using the same SQL
+// view that production code relies on, ensuring test assertions
+// match real behavior.
 func deriveChatStatus(ctx context.Context, db database.Store, chatID uuid.UUID) codersdk.ChatStatus {
-	step, err := db.GetActiveChatRunStep(ctx, chatID)
+	chatWithStatus, err := db.GetChatWithStatusByID(ctx, chatID)
 	if err != nil {
 		return codersdk.ChatStatusWaiting
 	}
-	run, err := db.GetChatRunByID(ctx, step.ChatRunID)
-	if err != nil {
-		return codersdk.ChatStatusWaiting
-	}
-	if run.WorkerID.Valid {
-		return codersdk.ChatStatusRunning
-	}
-	return codersdk.ChatStatusPending
+	return codersdk.ChatStatus(chatWithStatus.ComputedStatus)
 }
 
 func TestInterruptChatBroadcastsStatusAcrossInstances(t *testing.T) {
@@ -621,10 +615,10 @@ func TestRecoverStaleChatsPeriodically(t *testing.T) {
 	})
 
 	// The startup recovery should have already reset our stale
-	// chat. After recovery, the chat should be in waiting state
-	// (no active step).
+	// chat. After recovery, the chat should be in error state
+	// (step was marked as errored during recovery).
 	require.Eventually(t, func() bool {
-		return deriveChatStatus(ctx, db, chat.ID) == codersdk.ChatStatusWaiting
+		return deriveChatStatus(ctx, db, chat.ID) == codersdk.ChatStatusError
 	}, testutil.WaitMedium, testutil.IntervalFast)
 
 	// Now simulate a second stale chat appearing AFTER startup.
@@ -642,7 +636,7 @@ func TestRecoverStaleChatsPeriodically(t *testing.T) {
 	// The periodic stale recovery loop (running at staleAfter/5 =
 	// 100ms intervals) should pick this up without a restart.
 	require.Eventually(t, func() bool {
-		return deriveChatStatus(ctx, db, chat2.ID) == codersdk.ChatStatusWaiting
+		return deriveChatStatus(ctx, db, chat2.ID) == codersdk.ChatStatusError
 	}, testutil.WaitMedium, testutil.IntervalFast)
 }
 
@@ -685,10 +679,10 @@ func TestNewReplicaRecoversStaleChatFromDeadReplica(t *testing.T) {
 		require.NoError(t, newReplica.Close())
 	})
 
-	// After recovery, the chat should return to waiting (no active
-	// step).
+	// After recovery, the chat should return to error (step errored
+	// during recovery).
 	require.Eventually(t, func() bool {
-		return deriveChatStatus(ctx, db, chat.ID) == codersdk.ChatStatusWaiting
+		return deriveChatStatus(ctx, db, chat.ID) == codersdk.ChatStatusError
 	}, testutil.WaitMedium, testutil.IntervalFast)
 }
 

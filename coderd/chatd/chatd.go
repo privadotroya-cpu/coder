@@ -55,6 +55,13 @@ const (
 	// of 5 means recovery runs at 1/5 of the stale-after duration.
 	staleRecoveryIntervalDivisor = 5
 
+	// maxAcquirePerCycle is the maximum number of pending
+	// steps a single processOnce tick will acquire before
+	// yielding back to the polling loop. This prevents a
+	// single replica from blocking on acquisition when many
+	// steps are queued and lets the timer tick catch up.
+	maxAcquirePerCycle = 10
+
 	defaultSubagentInstruction = "You are running as a delegated sub-agent chat. Complete the delegated task and provide clear, concise assistant responses for the parent agent."
 )
 
@@ -333,15 +340,16 @@ func (p *Server) CreateChat(ctx context.Context, opts CreateOptions) (database.C
 		if !chat.RootChatID.Valid && !chat.ParentChatID.Valid {
 			chat.RootChatID = uuid.NullUUID{UUID: chat.ID, Valid: true}
 		}
+
+		// Create run+step inside the TX so the chat enters
+		// pending status atomically with creation.
+		if err := createRunAndStep(ctx, tx, insertedChat.ID); err != nil {
+			return xerrors.Errorf("create run and step: %w", err)
+		}
 		return nil
 	}, nil)
 	if txErr != nil {
 		return database.Chat{}, txErr
-	}
-
-	// Create a run+step so the chat enters pending status.
-	if err := p.reconcileChatRun(ctx, chat.ID); err != nil {
-		return database.Chat{}, xerrors.Errorf("reconcile chat run: %w", err)
 	}
 
 	p.publishChatPubsubEvent(chat, coderdpubsub.ChatEventKindCreated)
@@ -456,6 +464,11 @@ func (p *Server) SendMessage(
 		result.Message = message
 		result.Chat = lockedChat
 
+		// Create run+step inside the TX so the chat becomes
+		// pending atomically with the message insert.
+		if err := createRunAndStep(ctx, tx, lockedChat.ID); err != nil {
+			return xerrors.Errorf("create run and step: %w", err)
+		}
 		return nil
 	}, nil)
 	if txErr != nil {
@@ -492,11 +505,6 @@ func (p *Server) SendMessage(
 		}
 
 		return result, nil
-	}
-
-	// Create a run+step so the chat becomes pending.
-	if err := p.reconcileChatRun(ctx, opts.ChatID); err != nil {
-		return SendMessageResult{}, xerrors.Errorf("reconcile chat run: %w", err)
 	}
 
 	p.publishMessage(opts.ChatID, result.Message)
@@ -569,11 +577,10 @@ func (p *Server) EditMessage(
 			return xerrors.Errorf("delete queued messages: %w", err)
 		}
 
-		// Interrupt any active step so the edit triggers a
-		// fresh run. The reconcileChatRun call after the
-		// transaction creates a new run+step.
-		if interruptErr := tx.InterruptActiveChatRunStep(ctx, opts.ChatID); interruptErr != nil {
-			p.logger.Warn(ctx, "no active step to interrupt during edit",
+			// Interrupt any active step so the edit triggers a
+			// fresh run. The createRunAndStep call below creates
+			// a new run+step within this transaction.
+			if interruptErr := tx.InterruptActiveChatRunStep(ctx, opts.ChatID); interruptErr != nil {			p.logger.Warn(ctx, "no active step to interrupt during edit",
 				slog.F("chat_id", opts.ChatID),
 				slog.Error(interruptErr),
 			)
@@ -584,15 +591,16 @@ func (p *Server) EditMessage(
 		if err != nil {
 			return xerrors.Errorf("get chat after edit: %w", err)
 		}
+
+		// Create run+step inside the TX so the edited message
+		// triggers a fresh run atomically.
+		if err := createRunAndStep(ctx, tx, opts.ChatID); err != nil {
+			return xerrors.Errorf("create run and step: %w", err)
+		}
 		return nil
 	}, nil)
 	if txErr != nil {
 		return EditMessageResult{}, txErr
-	}
-
-	// Create a new run+step to process the edited message.
-	if err := p.reconcileChatRun(ctx, opts.ChatID); err != nil {
-		return EditMessageResult{}, xerrors.Errorf("reconcile chat run after edit: %w", err)
 	}
 
 	p.publishEditedMessage(opts.ChatID, result.Message)
@@ -792,15 +800,15 @@ func (p *Server) PromoteQueued(
 		}
 		result.PromotedMessage = promoted
 
+		// Create run+step inside the TX so the promoted
+		// message gets processed atomically.
+		if err := createRunAndStep(ctx, tx, lockedChat.ID); err != nil {
+			return xerrors.Errorf("create run and step: %w", err)
+		}
 		return nil
 	}, nil)
 	if txErr != nil {
 		return PromoteQueuedResult{}, txErr
-	}
-
-	// Create a new run+step so the promoted message gets processed.
-	if err := p.reconcileChatRun(ctx, opts.ChatID); err != nil {
-		return PromoteQueuedResult{}, xerrors.Errorf("reconcile chat run after promote: %w", err)
 	}
 
 	p.publishEvent(opts.ChatID, codersdk.ChatStreamEvent{
@@ -890,9 +898,31 @@ func (p *Server) deriveChatStatus(ctx context.Context, chatID uuid.UUID) (coders
 	return codersdk.ChatStatus(chatWithStatus.ComputedStatus), nil
 }
 
-// reconcileChatRun atomically creates a new chat run and its
-// first step. If an active step already exists (unique constraint
-// violation), the operation is silently skipped.
+// createRunAndStep inserts a new chat run and its first step
+// using the provided store (which may be a transaction handle).
+// If the partial unique index on active steps fires, the error
+// is returned so the caller can decide how to handle it.
+func createRunAndStep(ctx context.Context, store database.Store, chatID uuid.UUID) error {
+	run, err := store.InsertChatRun(ctx, chatID)
+	if err != nil {
+		return xerrors.Errorf("insert chat run: %w", err)
+	}
+	_, err = store.InsertChatRunStep(ctx, database.InsertChatRunStepParams{
+		ChatRunID:     run.ID,
+		ChatID:        chatID,
+		ModelConfigID: uuid.NullUUID{},
+	})
+	if err != nil {
+		return xerrors.Errorf("insert chat run step: %w", err)
+	}
+	return nil
+}
+
+// reconcileChatRun cleans up stalled steps and then atomically
+// creates a new chat run and its first step. If an active step
+// already exists (unique constraint violation), the operation is
+// silently skipped. This is used by processChat's auto-promote
+// path which runs outside of a user-facing transaction.
 func (p *Server) reconcileChatRun(ctx context.Context, chatID uuid.UUID) error {
 	// Phase 1: clean up stalled steps.
 	if err := p.db.ErrorStalledChatRunSteps(ctx, database.ErrorStalledChatRunStepsParams{
@@ -904,16 +934,7 @@ func (p *Server) reconcileChatRun(ctx context.Context, chatID uuid.UUID) error {
 
 	// Phase 2: atomically create run + first step.
 	err := p.db.InTx(func(tx database.Store) error {
-		run, txErr := tx.InsertChatRun(ctx, chatID)
-		if txErr != nil {
-			return xerrors.Errorf("insert chat run: %w", txErr)
-		}
-		_, txErr = tx.InsertChatRunStep(ctx, database.InsertChatRunStepParams{
-			ChatRunID:     run.ID,
-			ChatID:        chatID,
-			ModelConfigID: uuid.NullUUID{},
-		})
-		return txErr
+		return createRunAndStep(ctx, tx, chatID)
 	}, nil)
 	// If the unique constraint fires, there's already an active step.
 	if database.IsUniqueViolation(err) {
@@ -1034,11 +1055,23 @@ func (p *Server) start(ctx context.Context) {
 }
 
 func (p *Server) processOnce(ctx context.Context) {
+	for range maxAcquirePerCycle {
+		if !p.acquireAndProcess(ctx) {
+			return
+		}
+	}
+}
+
+// acquireAndProcess attempts to claim a single pending step and
+// spawn a goroutine to process it. It returns true when work was
+// found (the caller should try again), or false when no more work
+// is available or the server is shutting down.
+func (p *Server) acquireAndProcess(ctx context.Context) bool {
 	// Bail out early if the server is shutting down. The main
 	// loop's select can randomly pick the ticker over ctx.Done(),
 	// so we must guard against acquiring a step we cannot process.
 	if ctx.Err() != nil {
-		return
+		return false
 	}
 
 	// Try to acquire an unclaimed active step. We detach from the
@@ -1057,7 +1090,7 @@ func (p *Server) processOnce(ctx context.Context) {
 			p.logger.Error(ctx, "failed to acquire chat run step", slog.Error(err))
 		}
 		// No unclaimed steps or error.
-		return
+		return false
 	}
 
 	// Fetch the chat and the active step.
@@ -1070,7 +1103,7 @@ func (p *Server) processOnce(ctx context.Context) {
 			p.logger.Error(ctx, "failed to clear run worker",
 				slog.F("run_id", run.ID), slog.Error(clearErr))
 		}
-		return
+		return false
 	}
 	step, err := p.db.GetActiveChatRunStep(acquireCtx, run.ChatID)
 	if err != nil {
@@ -1080,7 +1113,7 @@ func (p *Server) processOnce(ctx context.Context) {
 			p.logger.Error(ctx, "failed to clear run worker",
 				slog.F("run_id", run.ID), slog.Error(clearErr))
 		}
-		return
+		return false
 	}
 
 	// If the server context was canceled while we were acquiring,
@@ -1095,7 +1128,7 @@ func (p *Server) processOnce(ctx context.Context) {
 				slog.F("run_id", run.ID), slog.Error(clearErr))
 		}
 		releaseCancel()
-		return
+		return false
 	}
 
 	// Process the chat (don't block the main loop).
@@ -1104,6 +1137,7 @@ func (p *Server) processOnce(ctx context.Context) {
 		defer p.inflight.Done()
 		p.processChat(ctx, chat, run, step)
 	}()
+	return true
 }
 
 func (p *Server) publishToStream(chatID uuid.UUID, event codersdk.ChatStreamEvent) {

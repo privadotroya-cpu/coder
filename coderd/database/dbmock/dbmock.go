@@ -2134,66 +2134,6 @@ func (mr *MockStoreMockRecorder) GetChatRunByID(ctx, id any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatRunByID", reflect.TypeOf((*MockStore)(nil).GetChatRunByID), ctx, id)
 }
 
-// GetChatRunStepByID mocks base method.
-func (m *MockStore) GetChatRunStepByID(ctx context.Context, id uuid.UUID) (database.ChatRunStep, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetChatRunStepByID", ctx, id)
-	ret0, _ := ret[0].(database.ChatRunStep)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// GetChatRunStepByID indicates an expected call of GetChatRunStepByID.
-func (mr *MockStoreMockRecorder) GetChatRunStepByID(ctx, id any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatRunStepByID", reflect.TypeOf((*MockStore)(nil).GetChatRunStepByID), ctx, id)
-}
-
-// GetChatRunStepByRunIDAndNumber mocks base method.
-func (m *MockStore) GetChatRunStepByRunIDAndNumber(ctx context.Context, arg database.GetChatRunStepByRunIDAndNumberParams) (database.ChatRunStep, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetChatRunStepByRunIDAndNumber", ctx, arg)
-	ret0, _ := ret[0].(database.ChatRunStep)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// GetChatRunStepByRunIDAndNumber indicates an expected call of GetChatRunStepByRunIDAndNumber.
-func (mr *MockStoreMockRecorder) GetChatRunStepByRunIDAndNumber(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatRunStepByRunIDAndNumber", reflect.TypeOf((*MockStore)(nil).GetChatRunStepByRunIDAndNumber), ctx, arg)
-}
-
-// GetChatRunStepsByRunID mocks base method.
-func (m *MockStore) GetChatRunStepsByRunID(ctx context.Context, chatRunID uuid.UUID) ([]database.ChatRunStep, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetChatRunStepsByRunID", ctx, chatRunID)
-	ret0, _ := ret[0].([]database.ChatRunStep)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// GetChatRunStepsByRunID indicates an expected call of GetChatRunStepsByRunID.
-func (mr *MockStoreMockRecorder) GetChatRunStepsByRunID(ctx, chatRunID any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatRunStepsByRunID", reflect.TypeOf((*MockStore)(nil).GetChatRunStepsByRunID), ctx, chatRunID)
-}
-
-// GetChatRunsByChatID mocks base method.
-func (m *MockStore) GetChatRunsByChatID(ctx context.Context, chatID uuid.UUID) ([]database.ChatRun, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetChatRunsByChatID", ctx, chatID)
-	ret0, _ := ret[0].([]database.ChatRun)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// GetChatRunsByChatID indicates an expected call of GetChatRunsByChatID.
-func (mr *MockStoreMockRecorder) GetChatRunsByChatID(ctx, chatID any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatRunsByChatID", reflect.TypeOf((*MockStore)(nil).GetChatRunsByChatID), ctx, chatID)
-}
-
 // GetChatSystemPrompt mocks base method.
 func (m *MockStore) GetChatSystemPrompt(ctx context.Context) (string, error) {
 	m.ctrl.T.Helper()

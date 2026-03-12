@@ -1167,38 +1167,6 @@ func (m queryMetricsStore) GetChatRunByID(ctx context.Context, id uuid.UUID) (da
 	return r0, r1
 }
 
-func (m queryMetricsStore) GetChatRunStepByID(ctx context.Context, id uuid.UUID) (database.ChatRunStep, error) {
-	start := time.Now()
-	r0, r1 := m.s.GetChatRunStepByID(ctx, id)
-	m.queryLatencies.WithLabelValues("GetChatRunStepByID").Observe(time.Since(start).Seconds())
-	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetChatRunStepByID").Inc()
-	return r0, r1
-}
-
-func (m queryMetricsStore) GetChatRunStepByRunIDAndNumber(ctx context.Context, arg database.GetChatRunStepByRunIDAndNumberParams) (database.ChatRunStep, error) {
-	start := time.Now()
-	r0, r1 := m.s.GetChatRunStepByRunIDAndNumber(ctx, arg)
-	m.queryLatencies.WithLabelValues("GetChatRunStepByRunIDAndNumber").Observe(time.Since(start).Seconds())
-	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetChatRunStepByRunIDAndNumber").Inc()
-	return r0, r1
-}
-
-func (m queryMetricsStore) GetChatRunStepsByRunID(ctx context.Context, chatRunID uuid.UUID) ([]database.ChatRunStep, error) {
-	start := time.Now()
-	r0, r1 := m.s.GetChatRunStepsByRunID(ctx, chatRunID)
-	m.queryLatencies.WithLabelValues("GetChatRunStepsByRunID").Observe(time.Since(start).Seconds())
-	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetChatRunStepsByRunID").Inc()
-	return r0, r1
-}
-
-func (m queryMetricsStore) GetChatRunsByChatID(ctx context.Context, chatID uuid.UUID) ([]database.ChatRun, error) {
-	start := time.Now()
-	r0, r1 := m.s.GetChatRunsByChatID(ctx, chatID)
-	m.queryLatencies.WithLabelValues("GetChatRunsByChatID").Observe(time.Since(start).Seconds())
-	m.queryCounts.WithLabelValues(httpmw.ExtractHTTPRoute(ctx), httpmw.ExtractHTTPMethod(ctx), "GetChatRunsByChatID").Inc()
-	return r0, r1
-}
-
 func (m queryMetricsStore) GetChatSystemPrompt(ctx context.Context) (string, error) {
 	start := time.Now()
 	r0, r1 := m.s.GetChatSystemPrompt(ctx)
