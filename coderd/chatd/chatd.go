@@ -577,10 +577,11 @@ func (p *Server) EditMessage(
 			return xerrors.Errorf("delete queued messages: %w", err)
 		}
 
-			// Interrupt any active step so the edit triggers a
-			// fresh run. The createRunAndStep call below creates
-			// a new run+step within this transaction.
-			if interruptErr := tx.InterruptActiveChatRunStep(ctx, opts.ChatID); interruptErr != nil {			p.logger.Warn(ctx, "no active step to interrupt during edit",
+		// Interrupt any active step so the edit triggers a
+		// fresh run. The createRunAndStep call below creates
+		// a new run+step within this transaction.
+		if interruptErr := tx.InterruptActiveChatRunStep(ctx, opts.ChatID); interruptErr != nil {
+			p.logger.Warn(ctx, "interrupt active step during edit",
 				slog.F("chat_id", opts.ChatID),
 				slog.Error(interruptErr),
 			)
@@ -875,8 +876,7 @@ func (p *Server) RefreshStatus(ctx context.Context, chatID uuid.UUID) error {
 }
 
 // interruptActiveStep marks the active step for a chat as
-// interrupted and publishes a waiting status. This is the
-// replacement for the old setChatWaiting.
+// interrupted and publishes a waiting status.
 func (p *Server) interruptActiveStep(ctx context.Context, chatID uuid.UUID) error {
 	if err := p.db.InterruptActiveChatRunStep(ctx, chatID); err != nil {
 		return xerrors.Errorf("interrupt active step: %w", err)
@@ -2060,9 +2060,10 @@ func (p *Server) processChat(ctx context.Context, chat database.Chat, run databa
 				msg, insertErr := tx.InsertChatMessage(cleanupCtx, database.InsertChatMessageParams{
 					ChatID:        chat.ID,
 					ModelConfigID: uuid.NullUUID{UUID: lockedChat.LastModelConfigID, Valid: true},
-					CreatedBy:     uuid.NullUUID{UUID: chat.OwnerID, Valid: true},
+					CreatedBy:     uuid.NullUUID{UUID: chat.OwnerID, Valid: chat.OwnerID != uuid.Nil},
 					ChatRunID:     uuid.NullUUID{},
-					ChatRunStepID: uuid.NullUUID{}, Role: "user",
+					ChatRunStepID: uuid.NullUUID{},
+					Role:          "user",
 					Content: pqtype.NullRawMessage{
 						RawMessage: nextQueued.Content,
 						Valid:      len(nextQueued.Content) > 0,

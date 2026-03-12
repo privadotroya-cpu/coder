@@ -1,7 +1,7 @@
 -- Insert a chat_run for the test chat created in 000422.
--- We set number explicitly and update last_run_number manually
--- since the auto-assign trigger depends on the chat existing
--- in the chats table at INSERT time.
+-- The trigger auto-assigns `number` by incrementing
+-- `last_run_number`, so we reset the counter first to
+-- ensure a deterministic fixture.
 UPDATE chats SET last_run_number = 0
 WHERE id = '72c0438a-18eb-4688-ab80-e4c6a126ef96';
 
