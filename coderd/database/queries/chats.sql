@@ -298,6 +298,7 @@ WHERE
 RETURNING
     *;
 
+
 -- name: GetChatDiffStatusByChatID :one
 SELECT
     *
@@ -352,6 +353,8 @@ INSERT INTO chat_diff_statuses (
     chat_id,
     url,
     pull_request_state,
+    pull_request_title,
+    pull_request_draft,
     changes_requested,
     additions,
     deletions,
@@ -362,6 +365,8 @@ INSERT INTO chat_diff_statuses (
     @chat_id::uuid,
     sqlc.narg('url')::text,
     sqlc.narg('pull_request_state')::text,
+    @pull_request_title::text,
+    @pull_request_draft::boolean,
     @changes_requested::boolean,
     @additions::integer,
     @deletions::integer,
@@ -373,6 +378,8 @@ ON CONFLICT (chat_id) DO UPDATE
 SET
     url = EXCLUDED.url,
     pull_request_state = EXCLUDED.pull_request_state,
+    pull_request_title = EXCLUDED.pull_request_title,
+    pull_request_draft = EXCLUDED.pull_request_draft,
     changes_requested = EXCLUDED.changes_requested,
     additions = EXCLUDED.additions,
     deletions = EXCLUDED.deletions,

@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"charm.land/fantasy"
+	"charm.land/fantasy/providers/anthropic"
 	"github.com/google/uuid"
 	"github.com/sqlc-dev/pqtype"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/xerrors"
 
 	"cdr.dev/slog/v3"
@@ -41,7 +43,7 @@ const (
 
 	homeInstructionLookupTimeout = 5 * time.Second
 	instructionCacheTTL          = 5 * time.Minute
-	chatHeartbeatInterval        = 30 * time.Second
+	chatHeartbeatInterval        = 60 * time.Second
 	maxChatSteps                 = 1200
 	// maxStreamBufferSize caps the number of events buffered
 	// per chat during a single LLM step. When exceeded the
@@ -52,6 +54,12 @@ const (
 	// recovery loop runs relative to the stale threshold. A value
 	// of 5 means recovery runs at 1/5 of the stale-after duration.
 	staleRecoveryIntervalDivisor = 5
+
+	// maxChatsPerAcquire is the maximum number of chats to
+	// acquire in a single processOnce call. Batching avoids
+	// waiting a full polling interval between acquisitions
+	// when many chats are pending.
+	maxChatsPerAcquire int32 = 10
 
 	defaultSubagentInstruction = "You are running as a delegated sub-agent chat. Complete the delegated task and provide clear, concise assistant responses for the parent agent."
 )
@@ -75,10 +83,10 @@ type Server struct {
 	webpushDispatcher webpush.Dispatcher
 	providerAPIKeys   chatprovider.ProviderAPIKeys
 
-	// streamMu guards chatStreams which tracks in-flight chat
-	// stream state for broadcasting ephemeral events.
-	streamMu    sync.Mutex
-	chatStreams map[uuid.UUID]*chatStreamState
+	// chatStreams stores per-chat stream state. Using sync.Map
+	// gives each chat independent locking — concurrent chats
+	// never contend with each other.
+	chatStreams sync.Map // uuid.UUID -> *chatStreamState
 
 	// instructionCache caches home instruction file contents by
 	// workspace agent ID so we don't re-dial on every chat turn.
@@ -139,6 +147,7 @@ type SubscribeFnParams struct {
 }
 
 type chatStreamState struct {
+	mu          sync.Mutex
 	buffer      []codersdk.ChatStreamEvent
 	buffering   bool
 	subscribers map[uuid.UUID]chan codersdk.ChatStreamEvent
@@ -1004,7 +1013,6 @@ func New(cfg Config) *Server {
 		pubsub:                     cfg.Pubsub,
 		webpushDispatcher:          cfg.WebpushDispatcher,
 		providerAPIKeys:            cfg.ProviderAPIKeys,
-		chatStreams:                make(map[uuid.UUID]*chatStreamState),
 		instructionCache:           make(map[uuid.UUID]cachedInstruction),
 		pendingChatAcquireInterval: pendingChatAcquireInterval,
 		inFlightChatStaleAfter:     inFlightChatStaleAfter,
@@ -1104,6 +1112,7 @@ func (p *Server) processOnce(ctx context.Context) {
 			p.logger.Error(ctx, "failed to release run acquired during shutdown",
 				slog.F("run_id", run.ID), slog.Error(clearErr))
 		}
+		releaseCancel()
 		return
 	}
 
@@ -1116,12 +1125,12 @@ func (p *Server) processOnce(ctx context.Context) {
 }
 
 func (p *Server) publishToStream(chatID uuid.UUID, event codersdk.ChatStreamEvent) {
-	p.streamMu.Lock()
-	state := p.streamStateLocked(chatID)
+	state := p.getOrCreateStreamState(chatID)
+	state.mu.Lock()
 	if event.Type == codersdk.ChatStreamEventTypeMessagePart {
 		if !state.buffering {
-			p.cleanupStreamIfIdleLocked(chatID, state)
-			p.streamMu.Unlock()
+			p.cleanupStreamIfIdle(chatID, state)
+			state.mu.Unlock()
 			return
 		}
 		if len(state.buffer) >= maxStreamBufferSize {
@@ -1135,7 +1144,7 @@ func (p *Server) publishToStream(chatID uuid.UUID, event codersdk.ChatStreamEven
 	for _, ch := range state.subscribers {
 		subscribers = append(subscribers, ch)
 	}
-	p.streamMu.Unlock()
+	state.mu.Unlock()
 
 	for _, ch := range subscribers {
 		select {
@@ -1147,13 +1156,11 @@ func (p *Server) publishToStream(chatID uuid.UUID, event codersdk.ChatStreamEven
 	}
 
 	// Clean up the stream entry if it was created by
-	// streamStateLocked but has no subscribers and is not
+	// getOrCreateStreamState but has no subscribers and is not
 	// actively buffering (e.g. publish with no watchers).
-	p.streamMu.Lock()
-	if cur, ok := p.chatStreams[chatID]; ok {
-		p.cleanupStreamIfIdleLocked(chatID, cur)
-	}
-	p.streamMu.Unlock()
+	state.mu.Lock()
+	p.cleanupStreamIfIdle(chatID, state)
+	state.mu.Unlock()
 }
 
 func (p *Server) subscribeToStream(chatID uuid.UUID) (
@@ -1161,48 +1168,52 @@ func (p *Server) subscribeToStream(chatID uuid.UUID) (
 	<-chan codersdk.ChatStreamEvent,
 	func(),
 ) {
-	p.streamMu.Lock()
-	state := p.streamStateLocked(chatID)
+	state := p.getOrCreateStreamState(chatID)
+	state.mu.Lock()
 	snapshot := append([]codersdk.ChatStreamEvent(nil), state.buffer...)
 	id := uuid.New()
 	ch := make(chan codersdk.ChatStreamEvent, 128)
 	state.subscribers[id] = ch
-	p.streamMu.Unlock()
+	state.mu.Unlock()
 
 	cancel := func() {
-		p.streamMu.Lock()
-		state, ok := p.chatStreams[chatID]
-		if ok {
-			// Remove the subscriber but do not close the channel.
-			// publishToStream copies subscriber references under
-			// streamMu then sends outside the lock; closing here
-			// races with that send and can panic. The channel
-			// becomes unreachable once removed and will be GC'd.
-			delete(state.subscribers, id)
-			p.cleanupStreamIfIdleLocked(chatID, state)
-		}
-		p.streamMu.Unlock()
+		state.mu.Lock()
+		// Remove the subscriber but do not close the channel.
+		// publishToStream copies subscriber references under
+		// the per-chat lock then sends outside; closing here
+		// races with that send and can panic. The channel
+		// becomes unreachable once removed and will be GC'd.
+		delete(state.subscribers, id)
+		p.cleanupStreamIfIdle(chatID, state)
+		state.mu.Unlock()
 	}
 
 	return snapshot, ch, cancel
 }
 
-// cleanupStreamIfIdleLocked removes the chat entry when there
-// are no subscribers and the stream is not buffering. The
-// caller must hold p.streamMu.
-func (p *Server) cleanupStreamIfIdleLocked(chatID uuid.UUID, state *chatStreamState) {
-	if !state.buffering && len(state.subscribers) == 0 {
-		delete(p.chatStreams, chatID)
+// getOrCreateStreamState returns the per-chat stream state,
+// creating one atomically if it doesn't exist. The returned
+// state has its own mutex — callers must lock state.mu for
+// access.
+func (p *Server) getOrCreateStreamState(chatID uuid.UUID) *chatStreamState {
+	if val, ok := p.chatStreams.Load(chatID); ok {
+		state, _ := val.(*chatStreamState)
+		return state
 	}
+	val, _ := p.chatStreams.LoadOrStore(chatID, &chatStreamState{
+		subscribers: make(map[uuid.UUID]chan codersdk.ChatStreamEvent),
+	})
+	state, _ := val.(*chatStreamState)
+	return state
 }
 
-func (p *Server) streamStateLocked(chatID uuid.UUID) *chatStreamState {
-	state, ok := p.chatStreams[chatID]
-	if !ok {
-		state = &chatStreamState{subscribers: make(map[uuid.UUID]chan codersdk.ChatStreamEvent)}
-		p.chatStreams[chatID] = state
+// cleanupStreamIfIdle removes the chat entry from the sync.Map
+// when there are no subscribers and the stream is not buffering.
+// The caller must hold state.mu.
+func (p *Server) cleanupStreamIfIdle(chatID uuid.UUID, state *chatStreamState) {
+	if !state.buffering && len(state.subscribers) == 0 {
+		p.chatStreams.Delete(chatID)
 	}
-	return state
 }
 
 func (p *Server) Subscribe(
@@ -1921,13 +1932,11 @@ func (p *Server) processChat(ctx context.Context, chat database.Chat, run databa
 	startState.buffering = true
 	p.streamMu.Unlock()
 	defer func() {
-		p.streamMu.Lock()
-		if stopState, ok := p.chatStreams[chat.ID]; ok {
-			stopState.buffer = nil
-			stopState.buffering = false
-			p.cleanupStreamIfIdleLocked(chat.ID, stopState)
-		}
-		p.streamMu.Unlock()
+		streamState.mu.Lock()
+		streamState.buffer = nil
+		streamState.buffering = false
+		p.cleanupStreamIfIdle(chat.ID, streamState)
+		streamState.mu.Unlock()
 	}()
 
 	p.publishStatus(chat.ID, codersdk.ChatStatusRunning)
@@ -2156,21 +2165,38 @@ func (p *Server) runChat(
 	chat database.Chat,
 	logger slog.Logger,
 ) error {
-	model, modelConfig, providerKeys, err := p.resolveChatModel(ctx, chat)
-	if err != nil {
-		return err
-	}
+	var (
+		model        fantasy.LanguageModel
+		modelConfig  database.ChatModelConfig
+		providerKeys chatprovider.ProviderAPIKeys
+		callConfig   codersdk.ChatModelCallConfig
+		messages     []database.ChatMessage
+	)
 
-	var callConfig codersdk.ChatModelCallConfig
-	if len(modelConfig.Options) > 0 {
-		if err := json.Unmarshal(modelConfig.Options, &callConfig); err != nil {
-			return xerrors.Errorf("parse model call config: %w", err)
+	var g errgroup.Group
+	g.Go(func() error {
+		var err error
+		model, modelConfig, providerKeys, err = p.resolveChatModel(ctx, chat)
+		if err != nil {
+			return err
 		}
-	}
-
-	messages, err := p.db.GetChatMessagesForPromptByChatID(ctx, chat.ID)
-	if err != nil {
-		return xerrors.Errorf("get chat messages: %w", err)
+		if len(modelConfig.Options) > 0 {
+			if err := json.Unmarshal(modelConfig.Options, &callConfig); err != nil {
+				return xerrors.Errorf("parse model call config: %w", err)
+			}
+		}
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		messages, err = p.db.GetChatMessagesForPromptByChatID(ctx, chat.ID)
+		if err != nil {
+			return xerrors.Errorf("get chat messages: %w", err)
+		}
+		return nil
+	})
+	if err := g.Wait(); err != nil {
+		return err
 	}
 	// Fire title generation asynchronously so it doesn't block the
 	// chat response. It uses a detached context so it can finish
@@ -2181,7 +2207,7 @@ func (p *Server) runChat(
 		p.maybeGenerateChatTitle(context.WithoutCancel(ctx), chat, messages, model, providerKeys, logger)
 	}()
 
-	prompt, err := chatprompt.ConvertMessagesWithFiles(ctx, messages, p.chatFileResolver())
+	prompt, err := chatprompt.ConvertMessagesWithFiles(ctx, messages, p.chatFileResolver(), logger)
 	if err != nil {
 		return xerrors.Errorf("build chat prompt: %w", err)
 	}
@@ -2293,11 +2319,23 @@ func (p *Server) runChat(
 		return currentConn, nil
 	}
 
-	if instruction := p.resolveInstructions(ctx, chat, getWorkspaceConn); instruction != "" {
+	var instruction, resolvedUserPrompt string
+	var g2 errgroup.Group
+	g2.Go(func() error {
+		instruction = p.resolveInstructions(ctx, chat, getWorkspaceConn)
+		return nil
+	})
+	g2.Go(func() error {
+		resolvedUserPrompt = p.resolveUserPrompt(ctx, chat.OwnerID)
+		return nil
+	})
+	_ = g2.Wait()
+
+	if instruction != "" {
 		prompt = chatprompt.InsertSystem(prompt, instruction)
 	}
-	if userPrompt := p.resolveUserPrompt(ctx, chat.OwnerID); userPrompt != "" {
-		prompt = chatprompt.InsertSystem(prompt, userPrompt)
+	if resolvedUserPrompt != "" {
+		prompt = chatprompt.InsertSystem(prompt, resolvedUserPrompt)
 	}
 
 	// Use the model config's context_limit as a fallback when the LLM	// provider doesn't include context_limit in its response metadata
@@ -2436,11 +2474,13 @@ func (p *Server) runChat(
 		// Clear the stream buffer now that the step is
 		// persisted. Late-joining subscribers will load
 		// these messages from the database instead.
-		p.streamMu.Lock()
-		if state, ok := p.chatStreams[chat.ID]; ok {
-			state.buffer = nil
+		if val, ok := p.chatStreams.Load(chat.ID); ok {
+			if ss, ok := val.(*chatStreamState); ok {
+				ss.mu.Lock()
+				ss.buffer = nil
+				ss.mu.Unlock()
+			}
 		}
-		p.streamMu.Unlock()
 
 		return nil
 	}
@@ -2553,6 +2593,13 @@ func (p *Server) runChat(
 		})...)
 	}
 
+	// Build provider-native tools (e.g., web search) based on
+	// the model configuration.
+	var providerTools []fantasy.Tool
+	if callConfig.ProviderOptions != nil {
+		providerTools = buildProviderTools(model.Provider(), callConfig.ProviderOptions)
+	}
+
 	err = chatloop.Run(ctx, chatloop.RunOptions{
 		Model:    model,
 		Messages: prompt,
@@ -2561,6 +2608,7 @@ func (p *Server) runChat(
 
 		ModelConfig:     callConfig,
 		ProviderOptions: chatprovider.ProviderOptionsFromChatModelConfig(model, callConfig.ProviderOptions),
+		ProviderTools:   providerTools,
 
 		ContextLimitFallback: modelConfigContextLimit,
 
@@ -2577,29 +2625,42 @@ func (p *Server) runChat(
 			if err != nil {
 				return nil, xerrors.Errorf("reload chat messages: %w", err)
 			}
-			reloadedPrompt, err := chatprompt.ConvertMessagesWithFiles(reloadCtx, reloadedMsgs, p.chatFileResolver())
+			reloadedPrompt, err := chatprompt.ConvertMessagesWithFiles(reloadCtx, reloadedMsgs, p.chatFileResolver(), logger)
 			if err != nil {
 				return nil, xerrors.Errorf("convert reloaded messages: %w", err)
 			}
 			if chat.ParentChatID.Valid {
 				reloadedPrompt = chatprompt.InsertSystem(reloadedPrompt, defaultSubagentInstruction)
 			}
-			if instruction := p.resolveInstructions(reloadCtx, chat, getWorkspaceConn); instruction != "" {
-				reloadedPrompt = chatprompt.InsertSystem(reloadedPrompt, instruction)
+			var reloadInstruction, reloadUserPrompt string
+			var rg errgroup.Group
+			rg.Go(func() error {
+				reloadInstruction = p.resolveInstructions(reloadCtx, chat, getWorkspaceConn)
+				return nil
+			})
+			rg.Go(func() error {
+				reloadUserPrompt = p.resolveUserPrompt(reloadCtx, chat.OwnerID)
+				return nil
+			})
+			_ = rg.Wait()
+
+			if reloadInstruction != "" {
+				reloadedPrompt = chatprompt.InsertSystem(reloadedPrompt, reloadInstruction)
 			}
-			if userPrompt := p.resolveUserPrompt(reloadCtx, chat.OwnerID); userPrompt != "" {
-				reloadedPrompt = chatprompt.InsertSystem(reloadedPrompt, userPrompt)
+			if reloadUserPrompt != "" {
+				reloadedPrompt = chatprompt.InsertSystem(reloadedPrompt, reloadUserPrompt)
 			}
 			return reloadedPrompt, nil
 		},
 
 		OnRetry: func(attempt int, retryErr error, delay time.Duration) {
-			p.streamMu.Lock()
-			if state, ok := p.chatStreams[chat.ID]; ok {
-				state.buffer = nil
+			if val, ok := p.chatStreams.Load(chat.ID); ok {
+				if rs, ok := val.(*chatStreamState); ok {
+					rs.mu.Lock()
+					rs.buffer = nil
+					rs.mu.Unlock()
+				}
 			}
-			p.streamMu.Unlock()
-
 			logger.Warn(ctx, "retrying LLM stream",
 				slog.F("attempt", attempt),
 				slog.F("delay", delay.String()),
@@ -2622,6 +2683,44 @@ func (p *Server) runChat(
 		},
 	})
 	return err
+}
+
+// buildProviderTools creates provider-native tool definitions
+// (like web search) based on the model configuration. These
+// tools are executed server-side by the LLM provider.
+func buildProviderTools(_ string, options *codersdk.ChatModelProviderOptions) []fantasy.Tool {
+	var tools []fantasy.Tool
+
+	if options.Anthropic != nil && options.Anthropic.WebSearchEnabled != nil && *options.Anthropic.WebSearchEnabled {
+		tools = append(tools, anthropic.WebSearchTool(&anthropic.WebSearchToolOptions{
+			AllowedDomains: options.Anthropic.AllowedDomains,
+			BlockedDomains: options.Anthropic.BlockedDomains,
+		}))
+	}
+
+	if options.OpenAI != nil && options.OpenAI.WebSearchEnabled != nil && *options.OpenAI.WebSearchEnabled {
+		args := map[string]any{}
+		if options.OpenAI.SearchContextSize != nil && *options.OpenAI.SearchContextSize != "" {
+			args["search_context_size"] = *options.OpenAI.SearchContextSize
+		}
+		if len(options.OpenAI.AllowedDomains) > 0 {
+			args["allowed_domains"] = options.OpenAI.AllowedDomains
+		}
+		tools = append(tools, fantasy.ProviderDefinedTool{
+			ID:   "web_search",
+			Name: "web_search",
+			Args: args,
+		})
+	}
+
+	if options.Google != nil && options.Google.WebSearchEnabled != nil && *options.Google.WebSearchEnabled {
+		tools = append(tools, fantasy.ProviderDefinedTool{
+			ID:   "web_search",
+			Name: "web_search",
+		})
+	}
+
+	return tools
 }
 
 // persistChatContextSummary persists a chat context summary to the database.
@@ -2678,6 +2777,8 @@ func (p *Server) persistChatContextSummary(
 		"chat_summarized",
 		summaryResult,
 		false,
+		false,
+		nil,
 	)
 	if err != nil {
 		return xerrors.Errorf("encode summary tool result: %w", err)
@@ -2781,18 +2882,30 @@ func (p *Server) resolveChatModel(
 	ctx context.Context,
 	chat database.Chat,
 ) (fantasy.LanguageModel, database.ChatModelConfig, chatprovider.ProviderAPIKeys, error) {
-	dbConfig, err := p.resolveModelConfig(ctx, chat)
-	if err != nil {
-		return nil, database.ChatModelConfig{}, chatprovider.ProviderAPIKeys{}, xerrors.Errorf(
-			"resolve model config: %w", err,
-		)
-	}
+	var (
+		dbConfig  database.ChatModelConfig
+		providers []database.ChatProvider
+	)
 
-	providers, err := p.db.GetEnabledChatProviders(ctx)
-	if err != nil {
-		return nil, database.ChatModelConfig{}, chatprovider.ProviderAPIKeys{}, xerrors.Errorf(
-			"get enabled chat providers: %w", err,
-		)
+	var g errgroup.Group
+	g.Go(func() error {
+		var err error
+		dbConfig, err = p.resolveModelConfig(ctx, chat)
+		if err != nil {
+			return xerrors.Errorf("resolve model config: %w", err)
+		}
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		providers, err = p.db.GetEnabledChatProviders(ctx)
+		if err != nil {
+			return xerrors.Errorf("get enabled chat providers: %w", err)
+		}
+		return nil
+	})
+	if err := g.Wait(); err != nil {
+		return nil, database.ChatModelConfig{}, chatprovider.ProviderAPIKeys{}, err
 	}
 	dbProviders := make(
 		[]chatprovider.ConfiguredProvider, 0, len(providers),

@@ -83,22 +83,23 @@ const (
 
 // ChatMessagePart is a structured chunk of a chat message.
 type ChatMessagePart struct {
-	Type        ChatMessagePartType `json:"type"`
-	Text        string              `json:"text,omitempty"`
-	Signature   string              `json:"signature,omitempty"`
-	ToolCallID  string              `json:"tool_call_id,omitempty"`
-	ToolName    string              `json:"tool_name,omitempty"`
-	Args        json.RawMessage     `json:"args,omitempty"`
-	ArgsDelta   string              `json:"args_delta,omitempty"`
-	Result      json.RawMessage     `json:"result,omitempty"`
-	ResultDelta string              `json:"result_delta,omitempty"`
-	IsError     bool                `json:"is_error,omitempty"`
-	SourceID    string              `json:"source_id,omitempty"`
-	URL         string              `json:"url,omitempty"`
-	Title       string              `json:"title,omitempty"`
-	MediaType   string              `json:"media_type,omitempty"`
-	Data        []byte              `json:"data,omitempty"`
-	FileID      uuid.NullUUID       `json:"file_id,omitempty" format:"uuid"`
+	Type             ChatMessagePartType `json:"type"`
+	Text             string              `json:"text,omitempty"`
+	Signature        string              `json:"signature,omitempty"`
+	ToolCallID       string              `json:"tool_call_id,omitempty"`
+	ToolName         string              `json:"tool_name,omitempty"`
+	Args             json.RawMessage     `json:"args,omitempty"`
+	ArgsDelta        string              `json:"args_delta,omitempty"`
+	Result           json.RawMessage     `json:"result,omitempty"`
+	ResultDelta      string              `json:"result_delta,omitempty"`
+	IsError          bool                `json:"is_error,omitempty"`
+	ProviderExecuted bool                `json:"provider_executed,omitempty"`
+	SourceID         string              `json:"source_id,omitempty"`
+	URL              string              `json:"url,omitempty"`
+	Title            string              `json:"title,omitempty"`
+	MediaType        string              `json:"media_type,omitempty"`
+	Data             []byte              `json:"data,omitempty"`
+	FileID           uuid.NullUUID       `json:"file_id,omitempty" format:"uuid"`
 	// The following fields are only set when Type is
 	// ChatInputPartTypeFileReference.
 	FileName  string `json:"file_name,omitempty"`
@@ -313,6 +314,9 @@ type ChatModelOpenAIProviderOptions struct {
 	ServiceTier         *string          `json:"service_tier,omitempty" description:"Latency tier to use for processing the request"`
 	StructuredOutputs   *bool            `json:"structured_outputs,omitempty" description:"Whether to enable structured JSON output mode" hidden:"true"`
 	StrictJSONSchema    *bool            `json:"strict_json_schema,omitempty" description:"Whether to enforce strict adherence to the JSON schema" hidden:"true"`
+	WebSearchEnabled    *bool            `json:"web_search_enabled,omitempty" description:"Enable OpenAI web search tool for grounding responses with real-time information"`
+	SearchContextSize   *string          `json:"search_context_size,omitempty" description:"Amount of search context to use" enum:"low,medium,high"`
+	AllowedDomains      []string         `json:"allowed_domains,omitempty" description:"Restrict web search to these domains"`
 }
 
 // ChatModelAnthropicThinkingOptions configures Anthropic thinking budget.
@@ -326,6 +330,9 @@ type ChatModelAnthropicProviderOptions struct {
 	Thinking               *ChatModelAnthropicThinkingOptions `json:"thinking,omitempty" description:"Configuration for extended thinking"`
 	Effort                 *string                            `json:"effort,omitempty" description:"Controls the level of reasoning effort" enum:"low,medium,high,max"`
 	DisableParallelToolUse *bool                              `json:"disable_parallel_tool_use,omitempty" description:"Whether to disable parallel tool execution"`
+	WebSearchEnabled       *bool                              `json:"web_search_enabled,omitempty" description:"Enable Anthropic web search tool for grounding responses with real-time information"`
+	AllowedDomains         []string                           `json:"allowed_domains,omitempty" description:"Restrict web search to these domains (cannot be used with blocked_domains)"`
+	BlockedDomains         []string                           `json:"blocked_domains,omitempty" description:"Block web search on these domains (cannot be used with allowed_domains)"`
 }
 
 // ChatModelGoogleThinkingConfig configures Google thinking behavior.
@@ -342,10 +349,11 @@ type ChatModelGoogleSafetySetting struct {
 
 // ChatModelGoogleProviderOptions configures Google provider behavior.
 type ChatModelGoogleProviderOptions struct {
-	ThinkingConfig *ChatModelGoogleThinkingConfig `json:"thinking_config,omitempty" description:"Configuration for extended thinking"`
-	CachedContent  string                         `json:"cached_content,omitempty" description:"Resource name of a cached content object" hidden:"true"`
-	SafetySettings []ChatModelGoogleSafetySetting `json:"safety_settings,omitempty" description:"Safety filtering settings for harmful content categories" hidden:"true"`
-	Threshold      string                         `json:"threshold,omitempty" hidden:"true"`
+	ThinkingConfig   *ChatModelGoogleThinkingConfig `json:"thinking_config,omitempty" description:"Configuration for extended thinking"`
+	CachedContent    string                         `json:"cached_content,omitempty" description:"Resource name of a cached content object" hidden:"true"`
+	SafetySettings   []ChatModelGoogleSafetySetting `json:"safety_settings,omitempty" description:"Safety filtering settings for harmful content categories" hidden:"true"`
+	Threshold        string                         `json:"threshold,omitempty" hidden:"true"`
+	WebSearchEnabled *bool                          `json:"web_search_enabled,omitempty" description:"Enable Google Search grounding for real-time information"`
 }
 
 // ChatModelOpenAICompatProviderOptions configures OpenAI-compatible behavior.
@@ -412,6 +420,17 @@ type ChatModelVercelProviderOptions struct {
 	ExtraBody         map[string]any                         `json:"extra_body,omitempty" description:"Additional fields to include in the request body" hidden:"true"`
 }
 
+// ModelCostConfig stores pricing metadata for a chat model.
+type ModelCostConfig struct {
+	// Pricing is stored as configuration metadata and currently only needs to
+	// round-trip cleanly through the API and admin UI. If we later use these
+	// values for billing-grade arithmetic, switch to a fixed-point type.
+	InputPricePerMillionTokens      *float64 `json:"input_price_per_million_tokens,omitempty" description:"Input token price in USD per 1M tokens"`
+	OutputPricePerMillionTokens     *float64 `json:"output_price_per_million_tokens,omitempty" description:"Output token price in USD per 1M tokens"`
+	CacheReadPricePerMillionTokens  *float64 `json:"cache_read_price_per_million_tokens,omitempty" description:"Cache read token price in USD per 1M tokens"`
+	CacheWritePricePerMillionTokens *float64 `json:"cache_write_price_per_million_tokens,omitempty" description:"Cache write or cache creation token price in USD per 1M tokens"`
+}
+
 // ChatModelCallConfig configures per-call model behavior defaults.
 type ChatModelCallConfig struct {
 	MaxOutputTokens  *int64                    `json:"max_output_tokens,omitempty" description:"Upper bound on tokens the model may generate"`
@@ -420,7 +439,50 @@ type ChatModelCallConfig struct {
 	TopK             *int64                    `json:"top_k,omitempty" description:"Number of highest-probability tokens to keep for sampling"`
 	PresencePenalty  *float64                  `json:"presence_penalty,omitempty" description:"Penalty for tokens that have already appeared in the output"`
 	FrequencyPenalty *float64                  `json:"frequency_penalty,omitempty" description:"Penalty for tokens based on their frequency in the output"`
+	Cost             *ModelCostConfig          `json:"cost,omitempty" description:"Optional pricing metadata for this model"`
 	ProviderOptions  *ChatModelProviderOptions `json:"provider_options,omitempty" description:"Provider-specific option overrides"`
+}
+
+// UnmarshalJSON accepts both the current nested cost object and the previous
+// top-level pricing keys so legacy stored model_config JSON continues to load.
+func (c *ChatModelCallConfig) UnmarshalJSON(data []byte) error {
+	type chatModelCallConfigAlias ChatModelCallConfig
+	aux := struct {
+		*chatModelCallConfigAlias
+		InputPricePerMillionTokens      *float64 `json:"input_price_per_million_tokens,omitempty"`
+		OutputPricePerMillionTokens     *float64 `json:"output_price_per_million_tokens,omitempty"`
+		CacheReadPricePerMillionTokens  *float64 `json:"cache_read_price_per_million_tokens,omitempty"`
+		CacheWritePricePerMillionTokens *float64 `json:"cache_write_price_per_million_tokens,omitempty"`
+	}{
+		chatModelCallConfigAlias: (*chatModelCallConfigAlias)(c),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	if aux.InputPricePerMillionTokens == nil &&
+		aux.OutputPricePerMillionTokens == nil &&
+		aux.CacheReadPricePerMillionTokens == nil &&
+		aux.CacheWritePricePerMillionTokens == nil {
+		return nil
+	}
+
+	if c.Cost == nil {
+		c.Cost = &ModelCostConfig{}
+	}
+	if c.Cost.InputPricePerMillionTokens == nil {
+		c.Cost.InputPricePerMillionTokens = aux.InputPricePerMillionTokens
+	}
+	if c.Cost.OutputPricePerMillionTokens == nil {
+		c.Cost.OutputPricePerMillionTokens = aux.OutputPricePerMillionTokens
+	}
+	if c.Cost.CacheReadPricePerMillionTokens == nil {
+		c.Cost.CacheReadPricePerMillionTokens = aux.CacheReadPricePerMillionTokens
+	}
+	if c.Cost.CacheWritePricePerMillionTokens == nil {
+		c.Cost.CacheWritePricePerMillionTokens = aux.CacheWritePricePerMillionTokens
+	}
+	return nil
 }
 
 // CreateChatModelConfigRequest creates a chat model config.
@@ -465,6 +527,8 @@ type ChatDiffStatus struct {
 	ChatID           uuid.UUID  `json:"chat_id" format:"uuid"`
 	URL              *string    `json:"url,omitempty"`
 	PullRequestState *string    `json:"pull_request_state,omitempty"`
+	PullRequestTitle string     `json:"pull_request_title"`
+	PullRequestDraft bool       `json:"pull_request_draft"`
 	ChangesRequested bool       `json:"changes_requested"`
 	Additions        int32      `json:"additions"`
 	Deletions        int32      `json:"deletions"`

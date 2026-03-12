@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
@@ -15,11 +16,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/coderdtest"
+	"github.com/coder/coder/v2/coderd/coderdtest/oidctest"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/dbfake"
 	"github.com/coder/coder/v2/coderd/externalauth"
 	coderdpubsub "github.com/coder/coder/v2/coderd/pubsub"
+	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/testutil"
 	"github.com/coder/websocket"
@@ -900,6 +903,48 @@ func TestListChatModelConfigs(t *testing.T) {
 		require.True(t, found)
 	})
 
+	t.Run("DeserializesLegacyPricingJSON", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := testutil.Context(t, testutil.WaitLong)
+		client, db := newChatClientWithDatabase(t)
+		firstUser := coderdtest.CreateFirstUser(t, client)
+
+		_, err := client.CreateChatProvider(ctx, codersdk.CreateChatProviderConfigRequest{
+			Provider: "openai",
+			APIKey:   "test-api-key",
+		})
+		require.NoError(t, err)
+
+		legacyOptions := json.RawMessage(`{"input_price_per_million_tokens":0.15,"output_price_per_million_tokens":0.6,"cache_read_price_per_million_tokens":0.03,"cache_write_price_per_million_tokens":0.3}`)
+		storedConfig, err := db.InsertChatModelConfig(dbauthz.AsSystemRestricted(ctx), database.InsertChatModelConfigParams{
+			Provider:             "openai",
+			Model:                "gpt-4o-mini-legacy",
+			DisplayName:          "GPT-4o Mini Legacy",
+			CreatedBy:            uuid.NullUUID{UUID: firstUser.UserID, Valid: true},
+			UpdatedBy:            uuid.NullUUID{UUID: firstUser.UserID, Valid: true},
+			Enabled:              true,
+			IsDefault:            false,
+			ContextLimit:         4096,
+			CompressionThreshold: 80,
+			Options:              legacyOptions,
+		})
+		require.NoError(t, err)
+
+		configs, err := client.ListChatModelConfigs(ctx)
+		require.NoError(t, err)
+		require.Len(t, configs, 1)
+		require.Equal(t, storedConfig.ID, configs[0].ID)
+		requireChatModelPricing(t, configs[0].ModelConfig, &codersdk.ChatModelCallConfig{
+			Cost: &codersdk.ModelCostConfig{
+				InputPricePerMillionTokens:      ptr.Ref(0.15),
+				OutputPricePerMillionTokens:     ptr.Ref(0.6),
+				CacheReadPricePerMillionTokens:  ptr.Ref(0.03),
+				CacheWritePricePerMillionTokens: ptr.Ref(0.3),
+			},
+		})
+	})
+
 	t.Run("SuccessForOrganizationMember", func(t *testing.T) {
 		t.Parallel()
 
@@ -944,11 +989,20 @@ func TestCreateChatModelConfig(t *testing.T) {
 
 		contextLimit := int64(4096)
 		isDefault := true
+		pricing := &codersdk.ChatModelCallConfig{
+			Cost: &codersdk.ModelCostConfig{
+				InputPricePerMillionTokens:      ptr.Ref(0.15),
+				OutputPricePerMillionTokens:     ptr.Ref(0.6),
+				CacheReadPricePerMillionTokens:  ptr.Ref(0.03),
+				CacheWritePricePerMillionTokens: ptr.Ref(0.3),
+			},
+		}
 		modelConfig, err := client.CreateChatModelConfig(ctx, codersdk.CreateChatModelConfigRequest{
 			Provider:     "openai",
 			Model:        "gpt-4o-mini",
 			ContextLimit: &contextLimit,
 			IsDefault:    &isDefault,
+			ModelConfig:  pricing,
 		})
 		require.NoError(t, err)
 		require.NotEqual(t, uuid.Nil, modelConfig.ID)
@@ -956,6 +1010,45 @@ func TestCreateChatModelConfig(t *testing.T) {
 		require.Equal(t, "gpt-4o-mini", modelConfig.Model)
 		require.EqualValues(t, 4096, modelConfig.ContextLimit)
 		require.True(t, modelConfig.IsDefault)
+		requireChatModelPricing(t, modelConfig.ModelConfig, pricing)
+
+		configs, err := client.ListChatModelConfigs(ctx)
+		require.NoError(t, err)
+		require.Len(t, configs, 1)
+		requireChatModelPricing(t, configs[0].ModelConfig, pricing)
+	})
+
+	t.Run("RejectsNegativePricing", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := testutil.Context(t, testutil.WaitLong)
+		client := newChatClient(t)
+		_ = coderdtest.CreateFirstUser(t, client)
+
+		_, err := client.CreateChatProvider(ctx, codersdk.CreateChatProviderConfigRequest{
+			Provider: "openai",
+			APIKey:   "test-api-key",
+		})
+		require.NoError(t, err)
+
+		contextLimit := int64(4096)
+		_, err = client.CreateChatModelConfig(ctx, codersdk.CreateChatModelConfigRequest{
+			Provider:     "openai",
+			Model:        "gpt-4o-mini",
+			ContextLimit: &contextLimit,
+			ModelConfig: &codersdk.ChatModelCallConfig{
+				Cost: &codersdk.ModelCostConfig{
+					InputPricePerMillionTokens: ptr.Ref(-0.01),
+				},
+			},
+		})
+		sdkErr := requireSDKError(t, err, http.StatusBadRequest)
+		require.Equal(t, "Invalid model config.", sdkErr.Message)
+		require.Equal(
+			t,
+			"cost.input_price_per_million_tokens must be greater than or equal to zero",
+			sdkErr.Detail,
+		)
 	})
 
 	t.Run("MissingContextLimit", func(t *testing.T) {
@@ -1026,14 +1119,53 @@ func TestUpdateChatModelConfig(t *testing.T) {
 		modelConfig := createChatModelConfig(t, client)
 
 		contextLimit := int64(8192)
+		pricing := &codersdk.ChatModelCallConfig{
+			Cost: &codersdk.ModelCostConfig{
+				InputPricePerMillionTokens:      ptr.Ref(0.2),
+				OutputPricePerMillionTokens:     ptr.Ref(0.8),
+				CacheReadPricePerMillionTokens:  ptr.Ref(0.04),
+				CacheWritePricePerMillionTokens: ptr.Ref(0.4),
+			},
+		}
 		updated, err := client.UpdateChatModelConfig(ctx, modelConfig.ID, codersdk.UpdateChatModelConfigRequest{
 			DisplayName:  "GPT-4o Mini Updated",
 			ContextLimit: &contextLimit,
+			ModelConfig:  pricing,
 		})
 		require.NoError(t, err)
 		require.Equal(t, modelConfig.ID, updated.ID)
 		require.Equal(t, "GPT-4o Mini Updated", updated.DisplayName)
 		require.EqualValues(t, 8192, updated.ContextLimit)
+		requireChatModelPricing(t, updated.ModelConfig, pricing)
+
+		configs, err := client.ListChatModelConfigs(ctx)
+		require.NoError(t, err)
+		require.Len(t, configs, 1)
+		requireChatModelPricing(t, configs[0].ModelConfig, pricing)
+	})
+
+	t.Run("RejectsNegativePricing", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := testutil.Context(t, testutil.WaitLong)
+		client := newChatClient(t)
+		_ = coderdtest.CreateFirstUser(t, client)
+		modelConfig := createChatModelConfig(t, client)
+
+		_, err := client.UpdateChatModelConfig(ctx, modelConfig.ID, codersdk.UpdateChatModelConfigRequest{
+			ModelConfig: &codersdk.ChatModelCallConfig{
+				Cost: &codersdk.ModelCostConfig{
+					OutputPricePerMillionTokens: ptr.Ref(-1.0),
+				},
+			},
+		})
+		sdkErr := requireSDKError(t, err, http.StatusBadRequest)
+		require.Equal(t, "Invalid model config.", sdkErr.Message)
+		require.Equal(
+			t,
+			"cost.output_price_per_million_tokens must be greater than or equal to zero",
+			sdkErr.Detail,
+		)
 	})
 
 	t.Run("NotFound", func(t *testing.T) {
@@ -2568,9 +2700,8 @@ func TestGetChatDiffStatus(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		refreshedAt := time.Date(2026, time.January, 15, 12, 0, 0, 0, time.UTC)
-		staleAt := time.Date(2026, time.January, 15, 13, 0, 0, 0, time.UTC)
-
+		refreshedAt := time.Now().UTC().Truncate(time.Second)
+		staleAt := refreshedAt.Add(time.Hour)
 		_, err = db.UpsertChatDiffStatusReference(
 			dbauthz.AsSystemRestricted(ctx),
 			database.UpsertChatDiffStatusReferenceParams{
@@ -2640,6 +2771,130 @@ func TestGetChatDiffStatus(t *testing.T) {
 		otherClient, _ := coderdtest.CreateAnotherUser(t, client, firstUser.OrganizationID)
 		_, err = otherClient.GetChatDiffStatus(ctx, createdChat.ID)
 		requireSDKError(t, err, http.StatusNotFound)
+	})
+
+	// Integration test: exercises the full HTTP handler refresh
+	// path with a real DB, dbauthz, a mock GitHub API, and an
+	// external-auth-linked user. Verifies that a stale chat diff
+	// status is refreshed end-to-end via the gitsync worker's
+	// Refresh pipeline (provider resolution, token acquisition
+	// through external auth, and PR status fetch).
+	t.Run("RefreshesStaleStatusWithExternalAuth", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := testutil.Context(t, testutil.WaitLong)
+
+		// Mock GitHub API over TLS so the git provider's URL patterns
+		// (which require https://) match our PR URLs.
+		ghAPI := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			// PR status: GET /repos/{owner}/{repo}/pulls/{number}
+			case r.URL.Path == "/repos/testorg/testrepo/pulls/42" && r.URL.Query().Get("per_page") == "":
+				_, _ = w.Write([]byte(`{
+					"state": "open",
+					"merged": false,
+					"draft": false,
+					"additions": 25,
+					"deletions": 7,
+					"changed_files": 4,
+					"head": {"sha": "abc123"}
+				}`))
+			// PR reviews: GET /repos/{owner}/{repo}/pulls/{number}/reviews
+			case strings.HasSuffix(r.URL.Path, "/reviews"):
+				_, _ = w.Write([]byte(`[]`))
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		t.Cleanup(ghAPI.Close)
+
+		// The git provider derives webBaseURL from apiBaseURL.
+		// For a TLS server at https://127.0.0.1:PORT, webBaseURL
+		// is the same, and PR URL patterns match
+		// https://127.0.0.1:PORT/{owner}/{repo}/pull/{number}.
+		ghWebHost := strings.TrimPrefix(ghAPI.URL, "https://")
+		prURL := fmt.Sprintf("https://%s/testorg/testrepo/pull/42", ghWebHost)
+		remoteOrigin := fmt.Sprintf("https://%s/testorg/testrepo.git", ghWebHost)
+
+		// Set up a fake OIDC IDP for external auth login.
+		const providerID = "test-github"
+		fake := oidctest.NewFakeIDP(t, oidctest.WithServing())
+
+		client, _, api := coderdtest.NewWithAPI(t, &coderdtest.Options{
+			DeploymentValues: chatDeploymentValues(t),
+			ExternalAuthConfigs: []*externalauth.Config{
+				fake.ExternalAuthConfig(t, providerID, nil, func(cfg *externalauth.Config) {
+					cfg.Type = codersdk.EnhancedExternalAuthProviderGitHub.String()
+					// Point the git provider at our mock API server.
+					cfg.APIBaseURL = ghAPI.URL
+					// Match the remote origin (127.0.0.1 host).
+					cfg.Regex = regexp.MustCompile(regexp.QuoteMeta(ghWebHost))
+				}),
+			},
+		})
+		db := api.Database
+
+		// Use the TLS mock server's HTTP client (which trusts its
+		// self-signed cert) for git provider API calls.
+		api.HTTPClient = ghAPI.Client()
+
+		user := coderdtest.CreateFirstUser(t, client)
+		modelConfig := createChatModelConfig(t, client)
+
+		// Log in to the external auth provider so the user has an
+		// ExternalAuthLink row in the DB. This is what
+		// resolveChatGitAccessToken reads via GetExternalAuthLink.
+		fake.ExternalLogin(t, client)
+
+		// Insert a chat owned by the user.
+		chat, err := db.InsertChat(dbauthz.AsSystemRestricted(ctx), database.InsertChatParams{
+			OwnerID:           user.UserID,
+			LastModelConfigID: modelConfig.ID,
+			Title:             "rbac integration test",
+		})
+		require.NoError(t, err)
+
+		// Store a pre-resolved PR URL so the refresh path uses
+		// ParsePullRequestURL directly (skipping branch-to-PR
+		// resolution, which isn't what we're testing). The status
+		// is stale (stale_at in the past) so the handler triggers
+		// a full refresh through RefreshChat.
+		_, err = db.UpsertChatDiffStatusReference(
+			dbauthz.AsSystemRestricted(ctx),
+			database.UpsertChatDiffStatusReferenceParams{
+				ChatID:          chat.ID,
+				Url:             sql.NullString{String: prURL, Valid: true},
+				GitBranch:       "feature/rbac-fix",
+				GitRemoteOrigin: remoteOrigin,
+				StaleAt:         time.Now().Add(-time.Minute),
+			},
+		)
+		require.NoError(t, err)
+
+		// Call the HTTP endpoint. This exercises the full code
+		// path: resolveChatDiffStatus -> RefreshChat (with
+		// AsSystemRestricted) -> Refresher.Refresh ->
+		// resolveChatGitAccessToken (GetExternalAuthLink with
+		// AsSystemRestricted) -> FetchPullRequestStatus (mock).
+		//
+		// Without the AsSystemRestricted fix, GetExternalAuthLink
+		// would fail under the chatd RBAC context (missing
+		// ActionReadPersonal), causing ErrNoTokenAvailable and a
+		// refresh failure that silently returns stale data.
+		status, err := client.GetChatDiffStatus(ctx, chat.ID)
+		require.NoError(t, err)
+
+		// The mock GitHub API returned PR #42 with 25 additions,
+		// 7 deletions, 4 changed files, state "open".
+		require.NotNil(t, status.RefreshedAt, "status should have been refreshed")
+		require.NotNil(t, status.PullRequestState)
+		require.Equal(t, "open", *status.PullRequestState)
+		require.EqualValues(t, 25, status.Additions)
+		require.EqualValues(t, 7, status.Deletions)
+		require.EqualValues(t, 4, status.ChangedFiles)
+		require.NotNil(t, status.URL)
+		require.Contains(t, *status.URL, "pull/42")
 	})
 }
 
@@ -3179,6 +3434,28 @@ func TestGetChatFile(t *testing.T) {
 		_, _, err = otherClient.GetChatFile(ctx, uploaded.ID)
 		requireSDKError(t, err, http.StatusNotFound)
 	})
+}
+
+func requireChatModelPricing(
+	t *testing.T,
+	actual *codersdk.ChatModelCallConfig,
+	expected *codersdk.ChatModelCallConfig,
+) {
+	t.Helper()
+	require.NotNil(t, actual)
+	require.NotNil(t, expected)
+
+	require.NotNil(t, actual.Cost)
+	require.NotNil(t, expected.Cost)
+	require.NotNil(t, actual.Cost.InputPricePerMillionTokens)
+	require.NotNil(t, actual.Cost.OutputPricePerMillionTokens)
+	require.NotNil(t, actual.Cost.CacheReadPricePerMillionTokens)
+	require.NotNil(t, actual.Cost.CacheWritePricePerMillionTokens)
+
+	require.Equal(t, *expected.Cost.InputPricePerMillionTokens, *actual.Cost.InputPricePerMillionTokens)
+	require.Equal(t, *expected.Cost.OutputPricePerMillionTokens, *actual.Cost.OutputPricePerMillionTokens)
+	require.Equal(t, *expected.Cost.CacheReadPricePerMillionTokens, *actual.Cost.CacheReadPricePerMillionTokens)
+	require.Equal(t, *expected.Cost.CacheWritePricePerMillionTokens, *actual.Cost.CacheWritePricePerMillionTokens)
 }
 
 func createChatModelConfig(t *testing.T, client *codersdk.Client) codersdk.ChatModelConfig {
