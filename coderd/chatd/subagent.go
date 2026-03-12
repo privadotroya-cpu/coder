@@ -14,6 +14,7 @@ import (
 
 	"github.com/coder/coder/v2/coderd/chatd/chatprompt"
 	"github.com/coder/coder/v2/coderd/database"
+	coderdpubsub "github.com/coder/coder/v2/coderd/pubsub"
 	"github.com/coder/coder/v2/codersdk"
 )
 
@@ -334,12 +335,12 @@ func (p *Server) awaitSubagentCompletion(
 	}
 
 	// Check immediately before entering the poll loop.
-	targetChat, report, done, checkErr := p.checkSubagentCompletion(ctx, targetChatID)
+	targetChat, report, targetStatus, done, checkErr := p.checkSubagentCompletion(ctx, targetChatID)
 	if checkErr != nil {
 		return database.Chat{}, "", checkErr
 	}
 	if done {
-		return handleSubagentDone(targetChat, report)
+		return handleSubagentDone(targetChat, report, targetStatus)
 	}
 
 	if timeout <= 0 {
@@ -406,12 +407,12 @@ func (p *Server) awaitSubagentCompletion(
 			return database.Chat{}, "", ctx.Err()
 		}
 
-		targetChat, report, done, checkErr = p.checkSubagentCompletion(ctx, targetChatID)
+		targetChat, report, targetStatus, done, checkErr = p.checkSubagentCompletion(ctx, targetChatID)
 		if checkErr != nil {
 			return database.Chat{}, "", checkErr
 		}
 		if done {
-			return handleSubagentDone(targetChat, report)
+			return handleSubagentDone(targetChat, report, targetStatus)
 		}
 	}
 }
@@ -421,8 +422,9 @@ func (p *Server) awaitSubagentCompletion(
 func handleSubagentDone(
 	chat database.Chat,
 	report string,
+	status codersdk.ChatStatus,
 ) (database.Chat, string, error) {
-	if chat.Status == database.ChatStatusError {
+	if status == codersdk.ChatStatusError {
 		reason := strings.TrimSpace(report)
 		if reason == "" {
 			reason = "agent reached error status"

@@ -1925,12 +1925,16 @@ func (p *Server) processChat(ctx context.Context, chat database.Chat, run databa
 	}()
 
 	// Start buffering stream events BEFORE publishing the running
-	// status.
-	p.streamMu.Lock()
-	startState := p.streamStateLocked(chat.ID)
-	startState.buffer = nil
-	startState.buffering = true
-	p.streamMu.Unlock()
+	// status. This closes a race where a subscriber sees
+	// status=running but misses message_part events because
+	// buffering hasn't started yet — the subscriber gets an empty
+	// snapshot and publishToStream drops message_parts while
+	// buffering is false.
+	streamState := p.getOrCreateStreamState(chat.ID)
+	streamState.mu.Lock()
+	streamState.buffer = nil
+	streamState.buffering = true
+	streamState.mu.Unlock()
 	defer func() {
 		streamState.mu.Lock()
 		streamState.buffer = nil

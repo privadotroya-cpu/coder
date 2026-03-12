@@ -3692,7 +3692,6 @@ func (q *sqlQuerier) UpdateChatProvider(ctx context.Context, arg UpdateChatProvi
 	return i, err
 }
 
-
 const acquireStaleChatDiffStatuses = `-- name: AcquireStaleChatDiffStatuses :many
 WITH acquired AS (
     UPDATE
