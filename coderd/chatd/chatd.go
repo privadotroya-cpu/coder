@@ -55,12 +55,6 @@ const (
 	// of 5 means recovery runs at 1/5 of the stale-after duration.
 	staleRecoveryIntervalDivisor = 5
 
-	// maxChatsPerAcquire is the maximum number of chats to
-	// acquire in a single processOnce call. Batching avoids
-	// waiting a full polling interval between acquisitions
-	// when many chats are pending.
-	maxChatsPerAcquire int32 = 10
-
 	defaultSubagentInstruction = "You are running as a delegated sub-agent chat. Complete the delegated task and provide clear, concise assistant responses for the parent agent."
 )
 
