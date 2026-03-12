@@ -1385,7 +1385,7 @@ CREATE VIEW chat_runs_with_status AS
     r.last_step_number,
     s.status AS step_status,
     s.error AS step_error,
-    COALESCE(s.completed_at, s.interrupted_at, s.started_at) AS updated_at
+    COALESCE(s.completed_at, s.interrupted_at, s.heartbeat_at, s.started_at) AS updated_at
    FROM (chat_runs r
      LEFT JOIN chat_run_steps_with_status s ON (((s.chat_run_id = r.id) AND (s.number = r.last_step_number))));
 
@@ -3680,6 +3680,8 @@ CREATE UNIQUE INDEX idx_chat_model_configs_single_default ON chat_model_configs 
 CREATE INDEX idx_chat_providers_enabled ON chat_providers USING btree (enabled);
 
 CREATE INDEX idx_chat_queued_messages_chat_id ON chat_queued_messages USING btree (chat_id);
+
+CREATE INDEX idx_chat_run_steps_chat_id ON chat_run_steps USING btree (chat_id);
 
 CREATE INDEX idx_chats_last_model_config_id ON chats USING btree (last_model_config_id);
 

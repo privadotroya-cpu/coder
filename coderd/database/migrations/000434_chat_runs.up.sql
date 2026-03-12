@@ -103,6 +103,9 @@ CREATE UNIQUE INDEX chat_run_steps_single_active
       AND error IS NULL
       AND interrupted_at IS NULL;
 
+-- Non-partial index for FK cascade performance when deleting chats.
+CREATE INDEX idx_chat_run_steps_chat_id ON chat_run_steps(chat_id);
+
 -- Link messages to their originating run and step.
 ALTER TABLE chat_messages ADD COLUMN chat_run_id UUID REFERENCES chat_runs(id) ON DELETE CASCADE;
 ALTER TABLE chat_messages ADD COLUMN chat_run_step_id UUID REFERENCES chat_run_steps(id) ON DELETE CASCADE;
@@ -136,7 +139,7 @@ SELECT
     r.*,
     s.status AS step_status,
     s.error AS step_error,
-    COALESCE(s.completed_at, s.interrupted_at, s.started_at) AS updated_at
+    COALESCE(s.completed_at, s.interrupted_at, s.heartbeat_at, s.started_at) AS updated_at
 FROM chat_runs r
 LEFT JOIN chat_run_steps_with_status s
     ON s.chat_run_id = r.id AND s.number = r.last_step_number;

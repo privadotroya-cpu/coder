@@ -883,23 +883,11 @@ func (p *Server) interruptActiveStep(ctx context.Context, chatID uuid.UUID) erro
 // deriveChatStatus computes the current chat status by checking
 // whether an active run step exists and its worker state.
 func (p *Server) deriveChatStatus(ctx context.Context, chatID uuid.UUID) (codersdk.ChatStatus, error) {
-	step, err := p.db.GetActiveChatRunStep(ctx, chatID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return codersdk.ChatStatusWaiting, nil
-	}
+	chatWithStatus, err := p.db.GetChatWithStatusByID(ctx, chatID)
 	if err != nil {
-		return "", err
+		return "", xerrors.Errorf("get chat with status: %w", err)
 	}
-	// Active step exists. If the run has no worker, it's pending.
-	// If it has a worker, it's running.
-	run, err := p.db.GetChatRunByID(ctx, step.ChatRunID)
-	if err != nil {
-		return "", xerrors.Errorf("get chat run: %w", err)
-	}
-	if run.WorkerID.Valid {
-		return codersdk.ChatStatusRunning, nil
-	}
-	return codersdk.ChatStatusPending, nil
+	return codersdk.ChatStatus(chatWithStatus.ComputedStatus), nil
 }
 
 // reconcileChatRun atomically creates a new chat run and its
@@ -1614,9 +1602,13 @@ func (p *Server) publishStatus(chatID uuid.UUID, status codersdk.ChatStatus) {
 		Type:   codersdk.ChatStreamEventTypeStatus,
 		Status: &codersdk.ChatStreamStatus{Status: status},
 	})
+	workerID := ""
+	if status == codersdk.ChatStatusRunning {
+		workerID = p.workerID.String()
+	}
 	notify := coderdpubsub.ChatStreamNotifyMessage{
 		Status:   string(status),
-		WorkerID: p.workerID.String(),
+		WorkerID: workerID,
 	}
 	p.publishChatStreamNotify(chatID, notify)
 }
@@ -1659,7 +1651,7 @@ func (p *Server) publishChatPubsubEvent(chat database.Chat, kind coderdpubsub.Ch
 	// Status is derived from run/step state via deriveChatStatus.
 	// We use a best-effort approach here — if the derivation
 	// fails, we default to "waiting".
-	if status, err := p.deriveChatStatus(context.Background(), chat.ID); err == nil {
+	if status, err := p.deriveChatStatus(dbauthz.AsSystemRestricted(context.Background()), chat.ID); err == nil {
 		sdkChat.Status = status
 	} else {
 		sdkChat.Status = codersdk.ChatStatusWaiting
@@ -2107,7 +2099,7 @@ func (p *Server) processChat(ctx context.Context, chat database.Chat, run databa
 		}
 	}()
 
-	if err := p.runChat(chatCtx, chat, logger); err != nil {
+	if err := p.runChat(chatCtx, chat, step, logger); err != nil {
 		if errors.Is(err, chatloop.ErrInterrupted) || errors.Is(context.Cause(chatCtx), chatloop.ErrInterrupted) {
 			logger.Info(ctx, "chat interrupted")
 			status = codersdk.ChatStatusWaiting
@@ -2161,6 +2153,7 @@ func isShutdownCancellation(
 func (p *Server) runChat(
 	ctx context.Context,
 	chat database.Chat,
+	runStep database.ChatRunStep,
 	logger slog.Logger,
 ) error {
 	var (
@@ -2386,10 +2379,12 @@ func (p *Server) runChat(
 			if lockErr != nil {
 				return xerrors.Errorf("lock chat for persist: %w", lockErr)
 			}
-			// Check that an active step still exists for this chat.
-			// If the step was interrupted or errored, we should not
-			// persist new messages.
-			if _, stepErr := tx.GetActiveChatRunStep(persistCtx, chat.ID); stepErr != nil {
+			// Check that the active step for this chat is still
+			// the one we are processing. If the step was
+			// interrupted/errored or a new step was created, we
+			// should not persist new messages.
+			activeStep, stepErr := tx.GetActiveChatRunStep(persistCtx, chat.ID)
+			if stepErr != nil || activeStep.ID != runStep.ID {
 				return chatloop.ErrInterrupted
 			}
 			if len(assistantBlocks) > 0 {
@@ -3116,26 +3111,20 @@ func (p *Server) recoverStaleChatRunSteps(ctx context.Context) {
 			slog.F("run_id", staleStep.ChatRunID),
 		)
 
-		// Mark the stale step as errored.
-		// Terminal-state guard: skip if already errored/completed.
-		if _, errStep := p.db.ErrorChatRunStep(ctx, database.ErrorChatRunStepParams{
-			ID:    staleStep.ID,
-			Error: "worker heartbeat expired (stale step recovery)",
-		}); errStep != nil {
-			if errors.Is(errStep, sql.ErrNoRows) {
-				// Step already transitioned to a terminal state.
-				continue
+		if err := p.db.InTx(func(tx database.Store) error {
+			if _, errStep := tx.ErrorChatRunStep(ctx, database.ErrorChatRunStepParams{
+				ID:    staleStep.ID,
+				Error: "worker heartbeat expired (stale step recovery)",
+			}); errStep != nil {
+				if errors.Is(errStep, sql.ErrNoRows) {
+					return nil // Already terminal, skip.
+				}
+				return errStep
 			}
-			p.logger.Error(ctx, "failed to error stale step",
-				slog.F("step_id", staleStep.ID), slog.Error(errStep))
-			continue
-		}
-
-		// Clear the worker on the run so the step is no longer
-		// associated with the dead worker.
-		if errClear := p.db.ClearChatRunWorker(ctx, staleStep.ChatRunID); errClear != nil {
-			p.logger.Error(ctx, "failed to clear run worker for stale step",
-				slog.F("run_id", staleStep.ChatRunID), slog.Error(errClear))
+			return tx.ClearChatRunWorker(ctx, staleStep.ChatRunID)
+		}, nil); err != nil {
+			p.logger.Error(ctx, "failed to recover stale step",
+				slog.F("step_id", staleStep.ID), slog.Error(err))
 			continue
 		}
 		recovered++

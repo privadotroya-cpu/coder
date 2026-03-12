@@ -2224,8 +2224,11 @@ func (q *querier) ErrorChatRunStep(ctx context.Context, arg database.ErrorChatRu
 }
 
 func (q *querier) ErrorStalledChatRunSteps(ctx context.Context, arg database.ErrorStalledChatRunStepsParams) error {
-	// ErrorStalledChatRunSteps is a system-level recovery operation.
-	if err := q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceChat); err != nil {
+	chat, err := q.db.GetChatByID(ctx, arg.ChatID)
+	if err != nil {
+		return err
+	}
+	if err := q.authorizeContext(ctx, policy.ActionUpdate, chat); err != nil {
 		return err
 	}
 	return q.db.ErrorStalledChatRunSteps(ctx, arg)
@@ -2373,7 +2376,11 @@ func (q *querier) GetAPIKeysLastUsedAfter(ctx context.Context, lastUsed time.Tim
 }
 
 func (q *querier) GetActiveChatRunStep(ctx context.Context, chatID uuid.UUID) (database.ChatRunStep, error) {
-	if err := q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat); err != nil {
+	chat, err := q.db.GetChatByID(ctx, chatID)
+	if err != nil {
+		return database.ChatRunStep{}, err
+	}
+	if err := q.authorizeContext(ctx, policy.ActionRead, chat); err != nil {
 		return database.ChatRunStep{}, err
 	}
 	return q.db.GetActiveChatRunStep(ctx, chatID)
@@ -2623,10 +2630,18 @@ func (q *querier) GetChatQueuedMessages(ctx context.Context, chatID uuid.UUID) (
 }
 
 func (q *querier) GetChatRunByID(ctx context.Context, id uuid.UUID) (database.ChatRun, error) {
-	if err := q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat); err != nil {
+	run, err := q.db.GetChatRunByID(ctx, id)
+	if err != nil {
 		return database.ChatRun{}, err
 	}
-	return q.db.GetChatRunByID(ctx, id)
+	chat, err := q.db.GetChatByID(ctx, run.ChatID)
+	if err != nil {
+		return database.ChatRun{}, err
+	}
+	if err := q.authorizeContext(ctx, policy.ActionRead, chat); err != nil {
+		return database.ChatRun{}, err
+	}
+	return run, nil
 }
 
 func (q *querier) GetChatRunStepByID(ctx context.Context, id uuid.UUID) (database.ChatRunStep, error) {
@@ -3509,7 +3524,7 @@ func (q *querier) GetRuntimeConfig(ctx context.Context, key string) (string, err
 
 func (q *querier) GetStaleChatRunSteps(ctx context.Context, staleThreshold time.Time) ([]database.GetStaleChatRunStepsRow, error) {
 	// GetStaleChatRunSteps is a system-level recovery operation.
-	if err := q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceChat); err != nil {
+	if err := q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceChat); err != nil {
 		return nil, err
 	}
 	return q.db.GetStaleChatRunSteps(ctx, staleThreshold)
@@ -4691,14 +4706,22 @@ func (q *querier) InsertChatQueuedMessage(ctx context.Context, arg database.Inse
 }
 
 func (q *querier) InsertChatRun(ctx context.Context, chatID uuid.UUID) (database.ChatRun, error) {
-	if err := q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceChat); err != nil {
+	chat, err := q.db.GetChatByID(ctx, chatID)
+	if err != nil {
+		return database.ChatRun{}, err
+	}
+	if err := q.authorizeContext(ctx, policy.ActionUpdate, chat); err != nil {
 		return database.ChatRun{}, err
 	}
 	return q.db.InsertChatRun(ctx, chatID)
 }
 
 func (q *querier) InsertChatRunStep(ctx context.Context, arg database.InsertChatRunStepParams) (database.ChatRunStep, error) {
-	if err := q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceChat); err != nil {
+	chat, err := q.db.GetChatByID(ctx, arg.ChatID)
+	if err != nil {
+		return database.ChatRunStep{}, err
+	}
+	if err := q.authorizeContext(ctx, policy.ActionUpdate, chat); err != nil {
 		return database.ChatRunStep{}, err
 	}
 	return q.db.InsertChatRunStep(ctx, arg)
@@ -5258,7 +5281,11 @@ func (q *querier) InsertWorkspaceResourceMetadata(ctx context.Context, arg datab
 }
 
 func (q *querier) InterruptActiveChatRunStep(ctx context.Context, chatID uuid.UUID) error {
-	if err := q.authorizeContext(ctx, policy.ActionUpdate, rbac.ResourceChat); err != nil {
+	chat, err := q.db.GetChatByID(ctx, chatID)
+	if err != nil {
+		return err
+	}
+	if err := q.authorizeContext(ctx, policy.ActionUpdate, chat); err != nil {
 		return err
 	}
 	return q.db.InterruptActiveChatRunStep(ctx, chatID)

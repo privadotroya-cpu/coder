@@ -2915,6 +2915,9 @@ UPDATE chat_run_steps
 SET heartbeat_at = NOW()
 WHERE
     id = $1::uuid
+    AND completed_at IS NULL
+    AND error IS NULL
+    AND interrupted_at IS NULL
     AND chat_run_id IN (
         SELECT id FROM chat_runs
         WHERE id = chat_run_steps.chat_run_id

@@ -1,4 +1,4 @@
--- Reverse 000431_chat_runs.up.sql
+-- Reverse 000434_chat_runs.up.sql
 
 -- Drop views (reverse order of creation).
 DROP VIEW IF EXISTS chats_with_status;
